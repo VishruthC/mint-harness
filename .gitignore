@@ -1,0 +1,58 @@
+
+# ── Secrets ──
+.env
+.env.*
+!.env.example
+!.env.template
+*.pem
+*.key
+secrets/
+credentials.json
+
+# ── Dependencies ──
+node_modules/
+
+# ── Build output ──
+dist/
+build/
+out/
+coverage/
+
+# ── Bun / test caches ──
+.bun/
+.cache/
+.tmp/
+temp/
+*.tsbuildinfo
+
+# ── Local databases and session data ──
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+data/
+sessions/
+workspace/
+
+# ── Logs ──
+*.log
+logs/
+
+# ── Editor / IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Operating system ──
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ── Local configuration ──
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
