@@ -28,6 +28,11 @@ function App() {
   const [input, setInput] = createSignal("");
   const [cursorPos, setCursorPos] = createSignal(0);
   const [commandIndex, setCommandIndex] = createSignal(0);
+  const renderer = useRenderer();
+  const terminal = useTerminalDimensions();
+  // Keep the palette, input, and chat chrome on screen at short terminal heights.
+  // Leave extra room for the palette while command suggestions are open.
+  const commandLimit = () => Math.max(1, Math.min(7, terminal().height - 20));
   const commands = [
     { command: "/help", description: "Show all commands" },
     { command: "/cat", description: "Open the interactive MINT cat menu" },
@@ -63,11 +68,11 @@ function App() {
     // Once an argument starts, suggestions should not cover the input or steal navigation.
     if (value.startsWith("/model ")) {
       const query = value.slice(7).trim().toLowerCase();
-      return models().filter((entry) => entry.id.toLowerCase().includes(query)).slice(0, 7).map((entry) => ({ command: `/model ${entry.id}`, description: "Select this model" }));
+      return models().filter((entry) => entry.id.toLowerCase().includes(query)).slice(0, commandLimit()).map((entry) => ({ command: `/model ${entry.id}`, description: "Select this model" }));
     }
     if (value.includes(" ")) return [];
     // Keep the picker compact; typing filters the complete command list.
-    return commands.filter((item) => item.command.trim().startsWith(value)).slice(0, 5);
+    return commands.filter((item) => item.command.trim().startsWith(value)).slice(0, commandLimit());
   });
   const [messages, setMessages] = createSignal<ViewMessage[]>([
     { role: "assistant", content: "mrrp! I'm MINT. Type a message to chat, or /help for commands. ♡" },
@@ -156,8 +161,26 @@ function App() {
   let configuredModel = "";
   let lastUserPrompt = "";
   let activeController: AbortController | undefined;
-  const renderer = useRenderer();
-  const terminal = useTerminalDimensions();
+  const sidebarVisible = () => terminal().width >= 100;
+  // Approximate usable text width inside the chat input box after outer padding,
+  // the optional sidebar, and panel/input padding. Used to pick compact copy.
+  const chatWidth = () => Math.max(0, terminal().width - (sidebarVisible() ? 37 : 6));
+  const inputHint = () =>
+    chatWidth() >= 108
+      ? "Enter send · Shift+Enter newline · scroll chat as one timeline · F2 cat menu · /retry retry · /cancel stop"
+      : chatWidth() >= 67
+        ? "Enter send · Shift+Enter newline · F2 cat menu · /retry · /cancel"
+        : "Enter send · F2 cat · /cancel";
+  const footerText = () =>
+    terminal().width >= 78
+      ? "Harness-aware tools · approval-gated file edits · NVIDIA NIM · made with ♡"
+      : terminal().width >= 50
+        ? "approval-gated edits · NVIDIA NIM · made with ♡"
+        : terminal().width >= 26
+          ? "MINT ♡ · approval-gated"
+          : "MINT ♡";
+  const commandPaletteHeader = () =>
+    terminal().width >= 64 ? "COMMANDS  ·  ↑/↓ select  ·  Tab complete" : "COMMANDS  ·  ↑/↓  ·  Tab";
 
   const persist = (message: StoredMessage) => store.addMessage(session(), message);
   const startNewSession = () => {
@@ -705,42 +728,89 @@ No file has been changed. Review this preview, then type /apply to approve or /r
 
   return (
     <box flexDirection="column" backgroundColor={colors.bg} padding={1} gap={1} width="100%" height="100%">
-      <box flexDirection="row" justifyContent="space-between" backgroundColor={colors.panel} padding={1}>
-        <box flexDirection="row" gap={1}><text fg={colors.pink}>✿ M I N T</text><text fg={colors.muted}>/ tiny coding companion</text></box>
-        <text fg={status() === "connected" ? colors.mint : status() === "error" ? colors.red : colors.peach}>
-          {status() === "connected" ? "● NVIDIA connected" : status() === "error" ? "● needs attention" : "◌ connecting"}
+      <box flexDirection="row" justifyContent="space-between" backgroundColor={colors.panel} padding={1} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
+        <box flexDirection="row" gap={1} minWidth={0} flexShrink={1}>
+          <text fg={colors.pink} wrapMode="none" flexShrink={0}>✿ M I N T</text>
+          <Show when={terminal().width >= 64}>
+            <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>/ tiny coding companion</text>
+          </Show>
+        </box>
+        <text fg={status() === "connected" ? colors.mint : status() === "error" ? colors.red : colors.peach} wrapMode="none" flexShrink={0}>
+          {terminal().width >= 56 ? (status() === "connected" ? "● NVIDIA connected" : status() === "error" ? "● needs attention" : "◌ connecting") : "●"}
         </text>
       </box>
 
-      <box flexDirection="row" gap={1} flexGrow={1} minWidth={0} width="100%">
-        <Show when={terminal().width >= 100}>
-        <box flexDirection="column" backgroundColor={colors.panel} padding={1} width={32} minWidth={28} gap={1}>
-          <box flexDirection="column" gap={0} onMouseDown={() => { setCatMenuOpen((open) => !open); setCatMenuIndex(0); setCatExpressionPicker(false); }}>
+      <box flexDirection="row" gap={1} flexGrow={1} minWidth={0} minHeight={0} width="100%" overflow="hidden">
+        <Show when={sidebarVisible()}>
+        <box flexDirection="column" backgroundColor={colors.panel} padding={1} width={32} minWidth={28} height="100%" minHeight={0} flexShrink={0} gap={1} overflow="hidden">
+          <box flexDirection="column" gap={0} flexShrink={0} onMouseDown={() => { setCatMenuOpen((open) => !open); setCatMenuIndex(0); setCatExpressionPicker(false); }}>
             <For each={catSprite(catProfile().selectedExpression, catFrame(), catMood())}>{(line) => <text fg={catMood() === "error" ? colors.red : catMood() === "happy" || catMood() === "love" ? colors.pink : colors.lavender}>{line}</text>}</For>
             <text fg={colors.pink}>[ MINT THE CAT ]</text>
             <text fg={colors.muted}>click or press F2 · /cat</text>
           </box>
-          <text fg={colors.muted}>{catProfile().pets} pets · {catProfile().treats} treats</text>
+          <text fg={colors.muted} width="100%" minWidth={0} flexShrink={0} wrapMode="none" truncate={true}>{catProfile().pets} pets · {catProfile().treats} treats</text>
+          <scrollbox flexGrow={1} minHeight={0} width="100%" minWidth={0} contentOptions={{ flexDirection: "column", gap: 1 }}>
           <Show when={catMenuOpen()}>
-            <box flexDirection="column" borderStyle="rounded" borderColor={colors.pink} padding={1} gap={0}>
+            <box flexDirection="column" borderStyle="rounded" borderColor={colors.pink} padding={1} gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
               <Show when={catExpressionPicker()}>
                 <text fg={colors.pink}>--- EXPRESSIONS ---</text>
-                <For each={CAT_EXPRESSIONS}>{(expression, index) => <text fg={index() === catExpressionIndex() ? colors.mint : catProfile().unlockedExpressions.includes(expression.id) ? colors.text : colors.muted}>{index() === catExpressionIndex() ? "❯ " : "  "}{catProfile().unlockedExpressions.includes(expression.id) ? "◆" : "[locked]"} {expression.label}</text>}</For>
-                <text fg={colors.muted}>↑/↓ choose · Enter equip · Esc back</text>
+                <For each={CAT_EXPRESSIONS}>{(expression, index) =>
+                  <box
+                    flexDirection="row"
+                    width="100%"
+                    minWidth={0}
+                    height={1}
+                    minHeight={1}
+                    overflow="hidden"
+                    backgroundColor={index() === catExpressionIndex() ? colors.lavender : colors.panel}
+                  >
+                    <text
+                      fg={index() === catExpressionIndex() ? colors.bg : catProfile().unlockedExpressions.includes(expression.id) ? colors.text : colors.muted}
+                      wrapMode="none"
+                      width="100%"
+                      minWidth={0}
+                      truncate={true}
+                    >
+                      {(index() === catExpressionIndex() ? "❯ " : "  ") + (catProfile().unlockedExpressions.includes(expression.id) ? "◆ " : "× ") + expression.label}
+                    </text>
+                  </box>
+                }</For>
+                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>↑/↓ choose · Enter · Esc</text>
               </Show>
               <Show when={!catExpressionPicker()}>
                 <text fg={colors.pink}>--- CAT MENU ---</text>
-                <For each={catMenuItems}>{(item, index) => <text fg={index() === catMenuIndex() ? colors.mint : colors.text}>{index() === catMenuIndex() ? "❯ " : "  "}{item.shortcut}  {item.label} · {item.detail}</text>}</For>
-                <text fg={colors.muted}>↑/↓ + Enter · Esc close</text>
+                <For each={catMenuItems}>{(item, index) =>
+                  <box
+                    flexDirection="row"
+                    width="100%"
+                    minWidth={0}
+                    height={1}
+                    minHeight={1}
+                    overflow="hidden"
+                    backgroundColor={index() === catMenuIndex() ? colors.lavender : colors.panel}
+                  >
+                    <text
+                      fg={index() === catMenuIndex() ? colors.bg : colors.text}
+                      wrapMode="none"
+                      width="100%"
+                      minWidth={0}
+                      truncate={true}
+                    >
+                      {(index() === catMenuIndex() ? "❯ " : "  ") + item.shortcut + "  " + item.label}
+                    </text>
+                  </box>
+                }</For>
+                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>{"· " + (catMenuItems[catMenuIndex()]?.detail ?? "")}</text>
+                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>↑/↓ + Enter · Esc close</text>
               </Show>
             </box>
           </Show>
           <text fg={colors.muted}>────────────────</text>
           <text fg={colors.mint}>MODEL</text>
-          <text fg={colors.text}>{model() || "not selected"}</text>
+          <text fg={colors.text} width="100%" minWidth={0} wrapMode="none" truncate={true}>{model() || "not selected"}</text>
           <text fg={colors.muted}>────────────────</text>
           <text fg={colors.peach}>STATUS</text>
-          <text fg={colors.text}>{notice()}</text>
+          <text fg={colors.text} width="100%" minWidth={0} wrapMode="none" truncate={true}>{notice()}</text>
           <text fg={colors.muted}>────────────────</text>
           <text fg={colors.muted}>/cat   interact with cat</text>
           <text fg={colors.muted}>/pet   pet the cat</text>
@@ -753,26 +823,76 @@ No file has been changed. Review this preview, then type /apply to approve or /r
           <text fg={colors.muted}>/capabilities tools</text>
           <text fg={colors.muted}>/apply approve diff</text>
           <text fg={colors.muted}>/quit  exit</text>
+          </scrollbox>
         </box>
         </Show>
 
-        <box flexGrow={1} minWidth={0} width="100%" flexDirection="column" backgroundColor={colors.panel} padding={1} gap={1}>
-          <text fg={colors.lavender}>✧ chat ✧</text>
-          <Show when={terminal().width < 100 && catMenuOpen()}>
-            <box flexDirection="column" borderStyle="rounded" borderColor={colors.pink} padding={1} gap={0}>
+        <box flexGrow={1} minWidth={0} minHeight={0} width="100%" flexDirection="column" backgroundColor={colors.panel} padding={1} gap={1} overflow="hidden">
+          <box flexDirection="row" justifyContent="space-between" width="100%" minWidth={0} flexShrink={0} overflow="hidden">
+            <text fg={colors.lavender} wrapMode="none">✧ chat ✧</text>
+            <Show when={!sidebarVisible()}>
+              <box flexDirection="row" gap={1} flexShrink={0}>
+                <text fg={colors.pink} wrapMode="none">^.^</text>
+                <text fg={colors.muted} wrapMode="none">{terminal().width >= 32 ? "F2 cat" : "F2"}</text>
+              </box>
+            </Show>
+          </box>
+          <Show when={!sidebarVisible() && catMenuOpen()}>
+            <box flexDirection="column" borderStyle="rounded" borderColor={colors.pink} padding={1} gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
               <Show when={catExpressionPicker()}>
                 <text fg={colors.pink}>✦ CAT EXPRESSIONS ✦</text>
-                <For each={CAT_EXPRESSIONS}>{(expression, index) => <text fg={index() === catExpressionIndex() ? colors.mint : catProfile().unlockedExpressions.includes(expression.id) ? colors.text : colors.muted}>{index() === catExpressionIndex() ? "❯ " : "  "}{catProfile().unlockedExpressions.includes(expression.id) ? "◆" : "[locked]"} {expression.label}</text>}</For>
-                <text fg={colors.muted}>↑/↓ choose · Enter equip · Esc back</text>
+                <For each={CAT_EXPRESSIONS}>{(expression, index) =>
+                  <box
+                    flexDirection="row"
+                    width="100%"
+                    minWidth={0}
+                    height={1}
+                    minHeight={1}
+                    overflow="hidden"
+                    backgroundColor={index() === catExpressionIndex() ? colors.lavender : colors.panel}
+                  >
+                    <text
+                      fg={index() === catExpressionIndex() ? colors.bg : catProfile().unlockedExpressions.includes(expression.id) ? colors.text : colors.muted}
+                      wrapMode="none"
+                      width="100%"
+                      minWidth={0}
+                      truncate={true}
+                    >
+                      {(index() === catExpressionIndex() ? "❯ " : "  ") + (catProfile().unlockedExpressions.includes(expression.id) ? "◆ " : "× ") + expression.label}
+                    </text>
+                  </box>
+                }</For>
+                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>↑/↓ choose · Enter · Esc</text>
               </Show>
               <Show when={!catExpressionPicker()}>
                 <text fg={colors.pink}>--- CAT MENU ---</text>
-                <For each={catMenuItems}>{(item, index) => <text fg={index() === catMenuIndex() ? colors.mint : colors.text}>{index() === catMenuIndex() ? "❯ " : "  "}{item.shortcut}  {item.label} · {item.detail}</text>}</For>
-                <text fg={colors.muted}>↑/↓ + Enter · Esc close</text>
+                <For each={catMenuItems}>{(item, index) =>
+                  <box
+                    flexDirection="row"
+                    width="100%"
+                    minWidth={0}
+                    height={1}
+                    minHeight={1}
+                    overflow="hidden"
+                    backgroundColor={index() === catMenuIndex() ? colors.lavender : colors.panel}
+                  >
+                    <text
+                      fg={index() === catMenuIndex() ? colors.bg : colors.text}
+                      wrapMode="none"
+                      width="100%"
+                      minWidth={0}
+                      truncate={true}
+                    >
+                      {(index() === catMenuIndex() ? "❯ " : "  ") + item.shortcut + "  " + item.label}
+                    </text>
+                  </box>
+                }</For>
+                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>{"· " + (catMenuItems[catMenuIndex()]?.detail ?? "")}</text>
+                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>↑/↓ + Enter · Esc close</text>
               </Show>
             </box>
           </Show>
-          <scrollbox flexGrow={1} minHeight={0} minWidth={0} width="100%" flexDirection="column" gap={1} stickyScroll={true} stickyStart="bottom">
+          <scrollbox flexGrow={1} minHeight={0} minWidth={0} width="100%" contentOptions={{ flexDirection: "column", gap: 1 }} stickyScroll={true} stickyStart="bottom">
             <For each={messages()}>
               {(message) => (
                 <box flexDirection="column" gap={0} width="100%" minWidth={0}>
@@ -785,25 +905,58 @@ No file has been changed. Review this preview, then type /apply to approve or /r
             </For>
           </scrollbox>
           <Show when={commandSuggestions().length > 0}>
-            <box backgroundColor={colors.bg} padding={1} flexDirection="column" gap={0}>
-              <text fg={colors.lavender}>COMMANDS  ·  ↑/↓ select  ·  Tab complete</text>
+            <box backgroundColor={colors.bg} borderStyle="rounded" borderColor={colors.lavender} padding={1} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
+              <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
+                <text fg={colors.lavender} wrapMode="none" width="100%" minWidth={0} truncate={true}>{commandPaletteHeader()}</text>
+              </box>
               <For each={commandSuggestions()}>{(item, index) =>
-                <box flexDirection="column" gap={0}>
-                  <text fg={index() === commandIndex() ? colors.mint : colors.text}>
-                    {index() === commandIndex() ? "❯ " : "  "}{item.command.trimEnd()}
+                <box
+                  flexDirection="row"
+                  width="100%"
+                  minWidth={0}
+                  height={1}
+                  minHeight={1}
+                  overflow="hidden"
+                  backgroundColor={index() === commandIndex() ? colors.lavender : colors.bg}
+                >
+                  <text
+                    fg={index() === commandIndex() ? colors.bg : colors.mint}
+                    width={24}
+                    maxWidth="100%"
+                    minWidth={0}
+                    flexShrink={1}
+                    marginRight={1}
+                    wrapMode="none"
+                    truncate={true}
+                  >
+                    {(index() === commandIndex() ? "❯ " : "  ") + item.command.trimEnd()}
                   </text>
-                  <text fg={colors.muted}>    {item.description}</text>
+                  <Show when={terminal().width >= 72}>
+                    <text
+                      fg={index() === commandIndex() ? colors.bg : colors.muted}
+                      flexGrow={1}
+                      minWidth={0}
+                      wrapMode="none"
+                      truncate={true}
+                    >
+                      {item.description}
+                    </text>
+                  </Show>
                 </box>
               }</For>
             </box>
           </Show>
-          <box backgroundColor={colors.bg} padding={1} flexDirection="column" gap={1}>
-            <text fg={colors.mint}>❯ {input().slice(0, cursorPos())}▌{input().slice(cursorPos())}</text><Show when={busy()}><text fg={colors.peach}>· generating answer</text></Show>
-            <text fg={colors.muted}>Enter send · Shift+Enter newline · scroll chat as one timeline · F2 cat menu · /retry retry · /cancel stop</text>
+          <box backgroundColor={colors.bg} padding={1} flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
+            <text fg={colors.mint} width="100%" minWidth={0} wrapMode="char">❯ {input().slice(0, cursorPos())}▌{input().slice(cursorPos())}</text><Show when={busy()}><text fg={colors.peach} width="100%" minWidth={0} wrapMode="none" truncate={true}>· generating answer</text></Show>
+            <Show when={terminal().height >= 24 && commandSuggestions().length === 0}>
+              <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>{inputHint()}</text>
+            </Show>
           </box>
         </box>
       </box>
-      <text fg={colors.muted}>Harness-aware tools · approval-gated file edits · NVIDIA NIM · made with ♡</text>
+      <Show when={terminal().height >= 24 && commandSuggestions().length === 0}>
+        <text fg={colors.muted} width="100%" minWidth={0} flexShrink={0} wrapMode="none" truncate={true}>{footerText()}</text>
+      </Show>
     </box>
   );
 }
