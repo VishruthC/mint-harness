@@ -1,4 +1,0 @@
-# Copy to .env for local development. Never commit a real API key.
-NVIDIA_API_KEY=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
-NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
-NVIDIA_MODEL=nvidia/nemotron-3.5-lightning-30b-a3b
