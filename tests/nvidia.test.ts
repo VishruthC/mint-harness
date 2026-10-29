@@ -55,3 +55,26 @@ describe("NvidiaClient", () => {
     expect(requestBody.stream).toBe(true);
   });
 });
+
+test("streams fragmented OpenAI-compatible tool calls", async () => {
+  const encoder = new TextEncoder();
+  const response = new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"workspace_","arguments":"{\\"path\\":"}}]}}]}\n'));
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"read","arguments":"\\"src/index.tsx\\"}"}}]}}]}\n'));
+      controller.close();
+    },
+  }), { status: 200, headers: { "Content-Type": "text/event-stream" } });
+  const client = new NvidiaClient("test-key", undefined, async () => response);
+  const events = [];
+  for await (const event of client.streamAgent("test-model", messages, [{
+    type: "function", function: { name: "workspace_read", description: "read", parameters: { type: "object", properties: {} } },
+  }])) events.push(event);
+  const calls = events.filter((event) => event.type === "tool_calls");
+  expect(calls).toHaveLength(1);
+  if (calls[0]?.type === "tool_calls") {
+    expect(calls[0].toolCalls[0]?.id).toBe("call_1");
+    expect(calls[0].toolCalls[0]?.function.name).toBe("workspace_read");
+    expect(JSON.parse(calls[0].toolCalls[0]!.function.arguments)).toEqual({ path: "src/index.tsx" });
+  }
+});

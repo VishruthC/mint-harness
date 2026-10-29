@@ -13,10 +13,10 @@
 - [x] SQLite sessions and resume
 - [x] Request cancellation
 - [x] Basic multiline input
-- [ ] Better scroll behavior
+- [x] Bounded message viewport and Page Up/Page Down scrolling
 - [ ] OS credential-store integration
-- [ ] Model picker UI
-- [ ] Better errors and retry behavior
+- [x] Filterable `/model` suggestions
+- [x] Actionable API errors and `/retry`
 
 ## Milestone 3 — Read-only coding-agent foundation
 - [x] Workspace-aware file listing
@@ -25,9 +25,10 @@
 - [x] Workspace path boundary checks
 - [x] Exclude common generated directories and sensitive environment/key files
 - [x] Reject symlinks that resolve outside the workspace
-- [ ] Add an NVIDIA tool-call/agent loop and model capability checks
-- [ ] Add tool registry schemas and tool-call/result conversation handling
-- [ ] Add focused tests and verify on the target machine
+- [x] Add an NVIDIA tool-call/agent loop and model capability checks
+- [x] Add tool registry schemas and tool-call/result conversation handling
+- [x] Add focused tests for tool-call parsing and capability discovery
+- [ ] Verify on the target machine
 
 ## Milestone 4 — Controlled file editing
 - [x] Full-file replacement proposal flow via `/propose <path>`
@@ -36,30 +37,30 @@
 - [x] `/cancel-write` for pending content/proposal
 - [x] Revalidate path and file hash before applying
 - [x] Tests for rejected/stale proposals and sensitive/out-of-root paths
-- [ ] Patch-based targeted edits rather than full-file replacement
-- [ ] Preserve existing file permissions on replacement
-- [ ] Run tests and type-check on Windows
+- [x] Patch-based targeted edits rather than full-file replacement
+- [x] Preserve existing file permissions on replacement
+- [x] Windows PowerShell check script for type-check and tests (must be run on target Windows machine)
 
-Note: this milestone adds manually initiated file proposals. NVIDIA-driven automatic tool calling is still a separate task and must not bypass these approval gates.
+Note: model-driven tool calling can request file proposals, but it cannot bypass the explicit approval gate. Terminal command execution remains a separate milestone.
 
 ## Milestone 5 — Approved terminal commands
-- [ ] Exact command and working directory preview
-- [ ] Explicit approval before execution
-- [ ] Timeouts, output limits, and cancellation
-- [ ] Exit-code and stderr/stdout reporting
-- [ ] Command restrictions and dangerous-command protections
+- [x] Exact command and working directory preview
+- [x] Explicit approval before execution
+- [x] Timeouts and output limits; cancellation still needs a dedicated process-kill path
+- [x] Exit-code and stderr/stdout reporting
+- [x] Command allowlist and shell-operator restrictions (defense-in-depth, not a sandbox)
 
 ## Milestone 6 — Project understanding
-- [ ] Respect `.gitignore` and MINT exclusions
-- [ ] Detect project type and language
-- [ ] Discover manifests, README files, and configuration
-- [ ] Bounded, request-focused context assembly
+- [x] Respect common `.gitignore` patterns and MINT exclusions
+- [x] Detect common project types and languages
+- [x] Discover common manifests, README/AGENTS files, and configuration
+- [x] Bounded project-context summary
 - [ ] Optional refreshable project summaries
 
 ## Milestone 7 — Agent orchestration
 - [ ] Multi-step task planning and tool selection
 - [ ] Configurable iteration and token limits
-- [ ] Detect repeated/unproductive tool calls
+- [x] Suppress repeated identical tool calls and cap calls per turn
 - [ ] Progress reporting, cancellation, and recovery
 - [ ] User checkpoints for ambiguous/high-impact tasks
 
@@ -98,3 +99,21 @@ Note: this milestone adds manually initiated file proposals. NVIDIA-driven autom
 - [ ] Version reporting and changelog
 - [ ] Upgrade/migration documentation
 - [ ] Security review before production-ready claims
+
+
+## Milestone 13 — Interactive ASCII cat
+- [x] Plain-ASCII terminal cat with lightweight idle animation
+- [x] Menu opened by mouse click where supported, F2, or `/cat`
+- [x] Pet/feed actions and persistent progress
+- [x] Unlockable expressions and expression picker
+- [x] Toggle animations and react to agent success/error states
+- [x] Unit tests for unlock progression and expression selection
+- [ ] Verify mouse event behavior and visual layout on target terminals
+
+
+## Agent loop limits
+
+- Defaults: 12 tool rounds and 24 total tool calls per user turn.
+- Configure with positive-integer `MINT_MAX_TOOL_ROUNDS` and `MINT_MAX_TOOL_CALLS_PER_TURN` values in `.env`; `.env.example` documents both.
+- Accounting is scoped to a single user message. Limit messages report the reached limit, usage, and that the task may remain incomplete.
+- Repeated-call protection compares tool arguments and results so a changed result is not mistaken for an unchanged loop. Terminal commands remain proposal-only until the user explicitly approves with `/run`.

@@ -1,0 +1,23 @@
+{
+  "name": "mint-cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A cute NVIDIA-powered terminal coding harness.",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --conditions=development src/index.tsx",
+    "start": "bun src/index.tsx",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "check:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows.ps1"
+  },
+  "dependencies": {
+    "@opentui/solid": "^0.7.0",
+    "solid-js": "1.9.12",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
+  }
+}

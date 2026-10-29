@@ -27,6 +27,15 @@ describe("SessionStore", () => {
     expect(store.getSession(session.id)?.title).toBe("hello mint");
   });
 
+  test("persists cat progress and animation preference", () => {
+    directory = mkdtempSync(join(tmpdir(), "mint-test-"));
+    store = new SessionStore(join(directory, "test.sqlite"));
+    const profile = store.getCatProfile();
+    expect(profile.pets).toBe(0);
+    store.updateCatProfile({ ...profile, pets: 3, treats: 2, selectedExpression: "love", animationsEnabled: false, unlockedExpressions: ["idle", "happy", "love"] });
+    expect(store.getCatProfile()).toEqual({ pets: 3, treats: 2, selectedExpression: "love", animationsEnabled: false, unlockedExpressions: ["idle", "happy", "love"] });
+  });
+
   test("lists newest sessions first and deletes their messages", () => {
     directory = mkdtempSync(join(tmpdir(), "mint-test-"));
     store = new SessionStore(join(directory, "test.sqlite"));

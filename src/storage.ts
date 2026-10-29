@@ -7,6 +7,14 @@ export type StoredMessage = {
   role: "system" | "user" | "assistant";
   content: string;
 };
+export type CatProfile = {
+  pets: number;
+  treats: number;
+  selectedExpression: string;
+  animationsEnabled: boolean;
+  unlockedExpressions: string[];
+};
+
 export type Session = {
   id: string;
   title: string;
@@ -44,6 +52,15 @@ export class SessionStore {
         created_at TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id, id);
+      CREATE TABLE IF NOT EXISTS cat_profile (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        pets INTEGER NOT NULL DEFAULT 0,
+        treats INTEGER NOT NULL DEFAULT 0,
+        selected_expression TEXT NOT NULL DEFAULT 'idle',
+        animations_enabled INTEGER NOT NULL DEFAULT 1,
+        unlocked_expressions TEXT NOT NULL DEFAULT '["idle","happy"]'
+      );
+      INSERT OR IGNORE INTO cat_profile (id) VALUES (1);
     `);
   }
 
@@ -79,6 +96,30 @@ export class SessionStore {
 
   deleteSession(sessionId: string) {
     this.db.query("DELETE FROM sessions WHERE id = ?").run(sessionId);
+  }
+
+  getCatProfile(): CatProfile {
+    const row = this.db.query("SELECT pets, treats, selected_expression, animations_enabled, unlocked_expressions FROM cat_profile WHERE id = 1").get() as {
+      pets: number; treats: number; selected_expression: string; animations_enabled: number; unlocked_expressions: string;
+    };
+    let unlockedExpressions: string[] = ["idle", "happy"];
+    try {
+      const parsed: unknown = JSON.parse(row.unlocked_expressions);
+      if (Array.isArray(parsed)) unlockedExpressions = parsed.filter((value): value is string => typeof value === "string");
+    } catch { /* Use safe defaults if a local profile is malformed. */ }
+    return {
+      pets: row.pets,
+      treats: row.treats,
+      selectedExpression: row.selected_expression,
+      animationsEnabled: row.animations_enabled === 1,
+      unlockedExpressions,
+    };
+  }
+
+  updateCatProfile(profile: CatProfile) {
+    this.db.query(`UPDATE cat_profile SET pets = ?, treats = ?, selected_expression = ?, animations_enabled = ?, unlocked_expressions = ? WHERE id = 1`)
+      .run(Math.max(0, Math.floor(profile.pets)), Math.max(0, Math.floor(profile.treats)), profile.selectedExpression,
+        profile.animationsEnabled ? 1 : 0, JSON.stringify([...new Set(profile.unlockedExpressions)]));
   }
 
   close() {

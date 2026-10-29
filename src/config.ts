@@ -1,16 +1,21 @@
 import { existsSync, readFileSync } from "node:fs";
 import { z } from "zod";
+import { DEFAULT_AGENT_LOOP_LIMITS } from "./agent-loop";
 
 const EnvSchema = z.object({
   NVIDIA_API_KEY: z.string().trim().min(1, "NVIDIA_API_KEY is missing"),
   NVIDIA_BASE_URL: z.string().url().default("https://integrate.api.nvidia.com/v1"),
   NVIDIA_MODEL: z.string().trim().optional().default(""),
+  MINT_MAX_TOOL_ROUNDS: z.coerce.number().int().positive().default(DEFAULT_AGENT_LOOP_LIMITS.maxToolRounds),
+  MINT_MAX_TOOL_CALLS_PER_TURN: z.coerce.number().int().positive().default(DEFAULT_AGENT_LOOP_LIMITS.maxToolCallsPerTurn),
 });
 
 export type MintConfig = {
   apiKey: string;
   baseUrl: string;
   preferredModel: string;
+  maxToolRounds: number;
+  maxToolCallsPerTurn: number;
 };
 
 function readDotEnv(path = ".env"): Record<string, string> {
@@ -37,10 +42,16 @@ export function loadConfig(env?: Record<string, string | undefined>): MintConfig
   // environment variables. A stale NVIDIA_API_KEY in the parent shell can otherwise
   // silently override the key the user just tested from .env and cause HTTP 403.
   const source = env ?? { ...Bun.env, ...readDotEnv() };
+  if (!source.NVIDIA_API_KEY?.trim()) {
+    throw new Error("NVIDIA_API_KEY is missing");
+  }
+
   const parsed = EnvSchema.safeParse({
     NVIDIA_API_KEY: source.NVIDIA_API_KEY,
     NVIDIA_BASE_URL: source.NVIDIA_BASE_URL || "https://integrate.api.nvidia.com/v1",
     NVIDIA_MODEL: source.NVIDIA_MODEL || "",
+    MINT_MAX_TOOL_ROUNDS: source.MINT_MAX_TOOL_ROUNDS ?? String(DEFAULT_AGENT_LOOP_LIMITS.maxToolRounds),
+    MINT_MAX_TOOL_CALLS_PER_TURN: source.MINT_MAX_TOOL_CALLS_PER_TURN ?? String(DEFAULT_AGENT_LOOP_LIMITS.maxToolCallsPerTurn),
   });
 
   if (!parsed.success) {
@@ -51,5 +62,7 @@ export function loadConfig(env?: Record<string, string | undefined>): MintConfig
     apiKey: parsed.data.NVIDIA_API_KEY,
     baseUrl: parsed.data.NVIDIA_BASE_URL.replace(/\/+$/, ""),
     preferredModel: parsed.data.NVIDIA_MODEL,
+    maxToolRounds: parsed.data.MINT_MAX_TOOL_ROUNDS,
+    maxToolCallsPerTurn: parsed.data.MINT_MAX_TOOL_CALLS_PER_TURN,
   };
 }

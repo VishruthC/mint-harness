@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WorkspaceTools } from "../src/tools";
@@ -104,6 +104,59 @@ describe("WorkspaceTools", () => {
     expect(applied.ok).toBe(false);
     const current = await tools.read("src/hello.ts");
     expect(current.ok && current.output).toContain("external modification");
+  });
+
+  test("creates targeted patch proposals without changing the file before approval", async () => {
+    const tools = await fixture();
+    const proposal = await tools.proposePatch("src/hello.ts", [{ find: "'mrrp'", replace: "'hello'" }]);
+    expect(proposal.ok).toBe(true);
+    if (!proposal.ok) return;
+    expect(proposal.proposal.preview).toContain("-'mrrp'");
+    expect(proposal.proposal.preview).toContain("+'hello'");
+    const before = await tools.read("src/hello.ts");
+    expect(before.ok && before.output).toContain("'mrrp'");
+  });
+
+  test("rejects ambiguous targeted patches", async () => {
+    const tools = await fixture();
+    await writeFile(join(root, "src", "hello.ts"), "same same\n");
+    const proposal = await tools.proposePatch("src/hello.ts", [{ find: "same", replace: "changed" }]);
+    expect(proposal.ok).toBe(false);
+  });
+
+  test("respects .gitignore entries in listing and search", async () => {
+    const tools = await fixture();
+    await writeFile(join(root, ".gitignore"), "*.secret\nignored-dir/\n");
+    await writeFile(join(root, "token.secret"), "hidden needle\n");
+    await mkdir(join(root, "ignored-dir"));
+    await writeFile(join(root, "ignored-dir", "file.ts"), "hidden needle\n");
+    const listing = await tools.list(".");
+    expect(listing.ok && listing.output).not.toContain("token.secret");
+    expect(listing.ok && listing.output).not.toContain("ignored-dir");
+    const results = await tools.search("hidden needle");
+    expect(results.ok && results.output).not.toContain("token.secret");
+    expect(results.ok && results.output).not.toContain("ignored-dir");
+  });
+
+  test("discovers project manifests and README context", async () => {
+    const tools = await fixture();
+    await writeFile(join(root, "package.json"), JSON.stringify({ name: "mint-fixture", scripts: { test: "bun test" } }));
+    await writeFile(join(root, "README.md"), "Fixture instructions");
+    const context = await tools.projectContext();
+    expect(context.ok && context.output).toContain("Node.js project (mint-fixture)");
+    expect(context.ok && context.output).toContain("Fixture instructions");
+  });
+
+  test("preserves file permission bits when applying a replacement on POSIX", async () => {
+    if (process.platform === "win32") return;
+    const tools = await fixture();
+    const target = join(root, "src", "hello.ts");
+    await chmod(target, 0o744);
+    const proposal = await tools.proposeWrite("src/hello.ts", "replacement\n");
+    expect(proposal.ok).toBe(true);
+    if (!proposal.ok) return;
+    expect((await tools.applyWrite(proposal.proposal.id)).ok).toBe(true);
+    expect((await stat(target)).mode & 0o777).toBe(0o744);
   });
 
   test("rejects symlinks pointing outside the workspace", async () => {

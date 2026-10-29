@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat, readdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, readdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 
 export type ToolResult = { ok: true; output: string } | { ok: false; error: string };
@@ -22,6 +22,8 @@ const MAX_SEARCH_FILE_BYTES = 1024 * 1024;
 const MAX_SEARCH_FILES = 1500;
 const MAX_SEARCH_MATCHES = 100;
 const MAX_DIFF_LINES = 240;
+const PROJECT_MARKERS = ["package.json", "bun.lock", "bun.lockb", "pnpm-lock.yaml", "yarn.lock", "package-lock.json", "pyproject.toml", "requirements.txt", "Cargo.toml", "go.mod", "pom.xml", "build.gradle", "build.gradle.kts", "composer.json", "Gemfile", "Makefile", "Dockerfile"];
+const DOC_MARKERS = ["README.md", "README", "readme.md", "AGENTS.md", "CONTRIBUTING.md"];
 
 function isSensitive(name: string): boolean {
   const lower = name.toLowerCase();
@@ -51,6 +53,7 @@ function makePreview(path: string, oldContent: string | null, newContent: string
 export class WorkspaceTools {
   readonly root: string;
   private pendingWrites = new Map<string, PendingWrite>();
+  private gitignoreCache: { mtimeMs: number; rules: string[] } | undefined;
 
   private constructor(root: string) {
     this.root = root;
@@ -74,7 +77,89 @@ export class WorkspaceTools {
 
   private displayPath(absolutePath: string): string {
     const rel = relative(this.root, absolutePath);
-    return rel || ".";
+    return (rel || ".").replace(/\\/g, "/").split(sep).join("/");
+  }
+
+  private async ignoreRules(): Promise<string[]> {
+    try {
+      const info = await stat(resolve(this.root, ".gitignore"));
+      if (this.gitignoreCache?.mtimeMs === info.mtimeMs) return this.gitignoreCache.rules;
+      const rules = (await readFile(resolve(this.root, ".gitignore"), "utf8"))
+        .split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith("#"));
+      this.gitignoreCache = { mtimeMs: info.mtimeMs, rules };
+      return rules;
+    } catch { return []; }
+  }
+
+  private async isIgnored(path: string, isDirectory = false): Promise<boolean> {
+    const rel = relative(this.root, path).replace(/\\/g, "/").split(sep).join("/");
+    if (!rel || rel === ".." || rel.startsWith("../")) return true;
+    if (rel.split("/").some((part) => IGNORED_DIRS.has(part) || isSensitive(part))) return true;
+    const rules = await this.ignoreRules();
+    let ignored = false;
+    for (let raw of rules) {
+      const negated = raw.startsWith("!");
+      if (negated) raw = raw.slice(1);
+      const anchored = raw.startsWith("/");
+      const directoryOnly = raw.endsWith("/");
+      raw = raw.replace(/^\//, "").replace(/\/$/, "");
+      const escaped = raw.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*\*/g, "§DOUBLESTAR§").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]").replace(/§DOUBLESTAR§/g, ".*");
+      const pattern = anchored || raw.includes("/") ? `^${escaped}(?:/.*)?$` : `(?:^|/)${escaped}(?:/.*)?$`;
+      const matches = new RegExp(pattern).test(rel) && (!directoryOnly || isDirectory || rel.includes("/"));
+      if (matches) ignored = !negated;
+    }
+    return ignored;
+  }
+
+  async projectContext(): Promise<ToolResult> {
+    const found: string[] = [];
+    for (const name of [...DOC_MARKERS, ...PROJECT_MARKERS, ".gitignore"]) {
+      try {
+        const file = resolve(this.root, name);
+        const info = await lstat(file);
+        if (!info.isFile() || info.size > 24 * 1024 || isSensitive(name)) continue;
+        const content = await readFile(file, "utf8");
+        if (content.includes("\0")) continue;
+        found.push(`--- ${name} ---\n${content.slice(0, 6000)}`);
+      } catch { /* optional project marker */ }
+    }
+    const packageText = found.find((part) => part.startsWith("--- package.json ---"));
+    let projectType = "Unknown / no common manifest found";
+    if (packageText) {
+      try {
+        const pkg = JSON.parse(packageText.slice(packageText.indexOf("\n") + 1));
+        projectType = `Node.js project${pkg.name ? ` (${pkg.name})` : ""}; package manager inferred from lockfile when present`;
+      } catch { projectType = "Node.js project (package.json found but could not parse)"; }
+    } else if (found.some((x) => x.startsWith("--- pyproject.toml ---") || x.startsWith("--- requirements.txt ---"))) projectType = "Python project";
+    else if (found.some((x) => x.startsWith("--- Cargo.toml ---"))) projectType = "Rust project";
+    else if (found.some((x) => x.startsWith("--- go.mod ---"))) projectType = "Go project";
+    else if (found.some((x) => x.startsWith("--- build.gradle") || x.startsWith("--- pom.xml ---"))) projectType = "Java/JVM project";
+    return { ok: true, output: `Workspace: ${this.root}\nDetected project: ${projectType}\nDiscovered ${found.length} project documents/manifests.\n\n${found.join("\n\n") || "No common project documentation or manifests found."}` };
+  }
+
+  async proposePatch(path: string, edits: Array<{ find: string; replace: string }>): Promise<{ ok: true; proposal: WriteProposal } | { ok: false; error: string }> {
+    if (!Array.isArray(edits) || edits.length < 1 || edits.length > 50) return { ok: false, error: "Provide between 1 and 50 targeted edits." };
+    const current = await this.read(path);
+    if (!current.ok) return current;
+    const marker = `--- ${this.displayPath(resolve(this.root, path.trim()))} ---\n`;
+    const original = current.output.startsWith(marker) ? current.output.slice(marker.length) : current.output.slice(current.output.indexOf("\n") + 1);
+    let updated = original;
+    for (let i = 0; i < edits.length; i++) {
+      const edit = edits[i];
+      if (!edit || typeof edit.find !== "string" || !edit.find || typeof edit.replace !== "string") return { ok: false, error: `Edit ${i + 1} needs non-empty find text and string replacement.` };
+      const first = updated.indexOf(edit.find);
+      if (first < 0) return { ok: false, error: `Edit ${i + 1}: exact find text was not found; no proposal created.` };
+      if (updated.indexOf(edit.find, first + edit.find.length) >= 0) return { ok: false, error: `Edit ${i + 1}: find text matches more than once. Add more surrounding context so the patch is unambiguous.` };
+      updated = updated.slice(0, first) + edit.replace + updated.slice(first + edit.find.length);
+    }
+    const proposal = await this.proposeWrite(path, updated);
+    if (!proposal.ok) return proposal;
+    const targetedPreview = edits.map((edit, index) => [
+      `@@ targeted edit ${index + 1} @@`,
+      ...edit.find.split("\n").map((line) => `-${line}`),
+      ...edit.replace.split("\n").map((line) => `+${line}`),
+    ].join("\n")).join("\n");
+    return { ok: true, proposal: { ...proposal.proposal, preview: `${proposal.proposal.path}\n\n${targetedPreview}\n\nOnly these exact-text regions are targeted. The final file is staged atomically after /apply.` } };
   }
 
   async list(path = "."): Promise<ToolResult> {
@@ -85,8 +170,8 @@ export class WorkspaceTools {
       const children = await readdir(directory, { withFileTypes: true });
       const entries: WorkspaceEntry[] = [];
       for (const child of children.sort((a, b) => a.name.localeCompare(b.name))) {
-        if (isSensitive(child.name) || IGNORED_DIRS.has(child.name)) continue;
         const fullPath = resolve(directory, child.name);
+        if (await this.isIgnored(fullPath, child.isDirectory())) continue;
         try {
           const canonical = await realpath(fullPath);
           if (!insideRoot(this.root, canonical)) continue;
@@ -188,6 +273,11 @@ export class WorkspaceTools {
       if (currentHash !== proposal.originalHash) return { ok: false, error: "File changed since the preview. Proposal was not applied; create a fresh preview." };
 
       await writeFile(temporaryPath, proposal.content, { encoding: "utf8", flag: "wx" });
+      // Preserve existing mode bits (including executable bit) when replacing a file.
+      try {
+        const existingStat = await lstat(proposal.absolutePath);
+        if (existingStat.isFile() && !existingStat.isSymbolicLink()) await chmod(temporaryPath, existingStat.mode & 0o777);
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
       // Re-check the target after writing the temporary file to reduce stale-write risk.
       let checkHash: string | null = null;
       try {
@@ -226,8 +316,8 @@ export class WorkspaceTools {
       try { children = await readdir(directory, { withFileTypes: true }); } catch { return; }
       for (const child of children) {
         if (truncated) return;
-        if (isSensitive(child.name) || IGNORED_DIRS.has(child.name)) continue;
         const fullPath = resolve(directory, child.name);
+        if (await this.isIgnored(fullPath, child.isDirectory())) continue;
         let canonical: string;
         try {
           canonical = await realpath(fullPath);
