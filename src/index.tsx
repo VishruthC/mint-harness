@@ -1,5 +1,5 @@
-import { render, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid";
-import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
+import { render, useKeyboard, useRenderer, useTerminalDimensions, usePaste, useSelectionHandler } from "@opentui/solid";
+import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { loadConfig, writeDotEnv, type MintConfig } from "./config";
 import { AgentTurnBudget, formatLimitMessage, RepeatedCallGuard } from "./agent-loop";
 import { NvidiaClient, type ChatMessage, type NvidiaModel, type ToolCall } from "./nvidia";
@@ -9,6 +9,18 @@ import { WorkspaceTools } from "./tools";
 import { ApprovedTerminal } from "./terminal";
 import { CAT_EXPRESSIONS, catProfileSummary, catSprite, feedCat, petCat, selectCatExpression, type CatMood } from "./cat";
 import type { CatProfile } from "./storage";
+import {
+  MAX_PASTE_CHARS,
+  sanitizePastedText,
+  insertAtCursor,
+  normalizeApiKey,
+  validateConnectDraft,
+  maskSecret,
+  nextConnectField,
+  resolveConnectModel,
+  type ConnectField,
+} from "./connect";
+import { createHostClipboard, createClipboard, createRendererClipboardAdapter, decodePasteBytes, stripAnsiSequences } from "@opentui/core";
 
 const colors = {
   bg: "#1e1e2e",
@@ -97,9 +109,25 @@ function App() {
   const [catExpressionPicker, setCatExpressionPicker] = createSignal(false);
   const [catExpressionIndex, setCatExpressionIndex] = createSignal(0);
 
-  // Connect flow state
-  const [connectStep, setConnectStep] = createSignal<"idle" | "apikey" | "baseurl" | "model" | "testing">("idle");
-  let connectConfig: Partial<MintConfig> = {};
+  // Connect popup state
+  const [connectOpen, setConnectOpen] = createSignal(false);
+  const [connectField, setConnectField] = createSignal<ConnectField>("apiKey");
+  const [connectDraft, setConnectDraft] = createSignal({ apiKey: "", baseUrl: "", model: "" });
+  const [connectCursor, setConnectCursor] = createSignal({ apiKey: 0, baseUrl: 0, model: 0 });
+  const [connectError, setConnectError] = createSignal("");
+  const [connectBusy, setConnectBusy] = createSignal(false);
+  let connectAbort: AbortController | undefined;
+
+  // Clipboard bridge
+  const [clipboard, setClipboard] = createSignal<ReturnType<typeof createClipboard> | null>(null);
+  let hostClipboard: ReturnType<typeof createHostClipboard> | null = null;
+  let clipboardDispose: (() => Promise<void>) | null = null;
+  let lastAutoCopyText = "";
+  let pasteEventCounter = 0;
+
+  // Toast notification
+  const [toast, setToast] = createSignal<string | null>(null);
+  let toastTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Session picker state
   const [sessionPickerOpen, setSessionPickerOpen] = createSignal(false);
@@ -166,6 +194,20 @@ function App() {
   }).catch((error) => {
     setNotice(error instanceof Error ? error.message : "Workspace initialization failed");
   });
+
+  // Initialize clipboard bridge
+  onMount(() => {
+    hostClipboard = createHostClipboard({ timeoutMs: 1200 });
+    const terminalAdapter = createRendererClipboardAdapter(renderer);
+    const cb = createClipboard({ host: hostClipboard, terminal: terminalAdapter });
+    setClipboard(cb);
+    clipboardDispose = () => cb.dispose();
+  });
+  onCleanup(() => {
+    if (clipboardDispose) clipboardDispose();
+    if (toastTimer) clearTimeout(toastTimer);
+  });
+
   const [session, setSession] = createSignal(store.createSession().id);
   let client: NvidiaClient | undefined;
   let configuredModel = "";
@@ -176,11 +218,13 @@ function App() {
   // the optional sidebar, and panel/input padding. Used to pick compact copy.
   const chatWidth = () => Math.max(0, terminal().width - (sidebarVisible() ? 37 : 6));
   const inputHint = () =>
-    chatWidth() >= 108
-      ? "Enter send · Shift+Enter newline · scroll chat as one timeline · F2 cat menu · /retry retry · /cancel stop"
-      : chatWidth() >= 67
-        ? "Enter send · Shift+Enter newline · F2 cat menu · /retry · /cancel"
-        : "Enter send · F2 cat · /cancel";
+    chatWidth() >= 114
+      ? "Enter send · Shift+Enter newline · F2 cat · Ctrl+Shift+V paste · select to copy · /retry · /cancel"
+      : chatWidth() >= 84
+        ? "Enter send · Shift+Enter newline · F2 cat · Ctrl+Shift+V paste · /retry · /cancel"
+        : chatWidth() >= 58
+          ? "Enter send · F2 cat · Ctrl+Shift+V · /cancel"
+          : "Enter send · F2 cat · /cancel";
   const footerText = () =>
     terminal().width >= 78
       ? "Harness-aware tools · approval-gated file edits · NVIDIA NIM · made with ♡"
@@ -233,68 +277,206 @@ function App() {
     }
   };
 
-  // Connect flow handlers
-  const startConnectFlow = () => {
-    setConnectStep("apikey");
-    connectConfig = {};
-    setMessages((old) => [...old, { role: "assistant", content: "NVIDIA API Setup\nEnter your API key (input will be masked):" }]);
-    setNotice("enter NVIDIA_API_KEY");
+  // Connect popup handlers
+  const openConnectPopup = () => {
+    setConnectDraft({
+      apiKey: "",
+      baseUrl: configuredModel ? "" : "https://integrate.api.nvidia.com/v1",
+      model: model() || configuredModel || "",
+    });
+    setConnectCursor({ apiKey: 0, baseUrl: 0, model: 0 });
+    setConnectField("apiKey");
+    setConnectError("");
+    setConnectBusy(false);
+    setConnectOpen(true);
   };
 
-  const handleConnectFlow = async (text: string) => {
-    const step = connectStep();
-    if (step === "apikey") {
-      connectConfig.apiKey = text;
-      if (!text || text.trim().length < 10) {
-        setMessages((old) => [...old, { role: "assistant", content: "Invalid API key. Please enter a valid NVIDIA API key." }]);
-        return;
+  const closeConnectPopup = () => {
+    if (connectAbort) {
+      connectAbort.abort();
+      connectAbort = undefined;
+    }
+    setConnectOpen(false);
+    setConnectDraft({ apiKey: "", baseUrl: "", model: "" });
+    setConnectCursor({ apiKey: 0, baseUrl: 0, model: 0 });
+    setConnectError("");
+    setConnectBusy(false);
+  };
+
+  const connectFieldValue = (field: ConnectField) => connectDraft()[field];
+  const connectFieldCursor = (field: ConnectField) => connectCursor()[field];
+
+  const setConnectFieldValue = (field: ConnectField, value: string) => {
+    setConnectDraft((old) => ({ ...old, [field]: value }));
+  };
+
+  const setConnectFieldCursor = (field: ConnectField, cursor: number) => {
+    setConnectCursor((old) => ({ ...old, [field]: cursor }));
+  };
+
+  const handleConnectPaste = async (text: string) => {
+    if (!connectOpen()) return false;
+    const field = connectField();
+    const { text: sanitized, truncated } = sanitizePastedText(text);
+    const cursor = connectFieldCursor(field);
+    const { value, cursor: newCursor } = insertAtCursor(connectFieldValue(field), cursor, sanitized);
+    setConnectFieldValue(field, value);
+    setConnectFieldCursor(field, newCursor);
+    if (truncated) showToast(`Paste truncated to ${MAX_PASTE_CHARS} chars`);
+    return true;
+  };
+
+  const handleConnectKey = async (key: { name: string; ctrl: boolean; shift: boolean; meta: boolean; sequence: string }) => {
+    if (!connectOpen()) return false;
+
+    const field = connectField();
+    const value = connectFieldValue(field);
+    const cursor = connectFieldCursor(field);
+
+    if (key.name === "escape") {
+      closeConnectPopup();
+      return true;
+    }
+    if (key.name === "tab") {
+      const next = nextConnectField(field, key.shift);
+      setConnectField(next);
+      return true;
+    }
+    if ((key.ctrl && key.name === "v") || (key.name === "insert" && key.shift)) {
+      const text = await readClipboardText();
+      if (text) await handleConnectPaste(text);
+      return true;
+    }
+    if (key.name === "backspace") {
+      if (cursor > 0) {
+        const { value: newValue, cursor: newCursor } = insertAtCursor(value, cursor, "");
+        setConnectFieldValue(field, newValue);
+        setConnectFieldCursor(field, newCursor);
       }
-      setConnectStep("baseurl");
-      setMessages((old) => [...old, { role: "assistant", content: `Enter base URL (default: https://integrate.api.nvidia.com/v1):` }]);
-      setNotice("enter base URL or press Enter for default");
+      return true;
+    }
+    if (key.name === "delete") {
+      if (cursor < value.length) {
+        const { value: newValue, cursor: newCursor } = insertAtCursor(value, cursor, "");
+        setConnectFieldValue(field, newValue.slice(0, cursor) + value.slice(cursor + 1));
+        setConnectFieldCursor(field, cursor);
+      }
+      return true;
+    }
+    if (key.name === "left") {
+      setConnectFieldCursor(field, Math.max(0, cursor - 1));
+      return true;
+    }
+    if (key.name === "right") {
+      setConnectFieldCursor(field, Math.min(value.length, cursor + 1));
+      return true;
+    }
+    if (key.name === "home") {
+      setConnectFieldCursor(field, 0);
+      return true;
+    }
+    if (key.name === "end") {
+      setConnectFieldCursor(field, value.length);
+      return true;
+    }
+    if (key.name === "return") {
+      await submitConnect();
+      return true;
+    }
+    if (key.sequence && key.sequence.length === 1 && !key.ctrl && !key.shift && !key.meta) {
+      const { value: newValue, cursor: newCursor } = insertAtCursor(value, cursor, key.sequence);
+      setConnectFieldValue(field, newValue);
+      setConnectFieldCursor(field, newCursor);
+      return true;
+    }
+    return false;
+  };
+
+  const readClipboardText = async (): Promise<string | null> => {
+    if (!clipboard()) return null;
+    try {
+      const result = await clipboard()!.read({
+        preferredTypes: ["text/plain", "UTF8_STRING", "STRING"],
+        selection: "clipboard",
+      });
+      if (result.status === "read") {
+        return new TextDecoder().decode(result.representation.bytes);
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  };
+
+  const copyText = async (text: string): Promise<boolean> => {
+    if (!clipboard()) return false;
+    try {
+      const result = await clipboard()!.writeText(text, { destination: "best-available" });
+      if (result.host?.status === "written" || result.terminal?.status === "attempted") return true;
+    } catch {
+      // ignore
+    }
+    // Fallback to OSC52
+    try {
+      return renderer.copyToClipboardOSC52(text);
+    } catch {
+      return false;
+    }
+  };
+
+  const showToast = (text: string, duration = 1800) => {
+    if (toastTimer) clearTimeout(toastTimer);
+    setToast(text);
+    toastTimer = setTimeout(() => setToast(null), duration);
+  };
+
+  const submitConnect = async () => {
+    const draft = connectDraft();
+    const apiKey = normalizeApiKey(draft.apiKey);
+    const baseUrl = draft.baseUrl || "https://integrate.api.nvidia.com/v1";
+    const model = draft.model.trim();
+
+    const validation = validateConnectDraft(apiKey, baseUrl, model);
+    if (!validation.ok) {
+      setConnectError(validation.error || "Invalid configuration");
       return;
     }
-    if (step === "baseurl") {
-      connectConfig.baseUrl = text || "https://integrate.api.nvidia.com/v1";
-      setConnectStep("model");
-      setMessages((old) => [...old, { role: "assistant", content: `Enter model ID (optional, press Enter to skip):` }]);
-      setNotice("enter model ID or press Enter to skip");
-      return;
-    }
-    if (step === "model") {
-      connectConfig.preferredModel = text || undefined;
-      setConnectStep("testing");
-      setNotice("testing connection…");
-      try {
-        const testClient = new NvidiaClient(connectConfig.apiKey!, connectConfig.baseUrl!);
-        const list = await testClient.listModels();
-        if (list.length === 0) throw new Error("No models returned from NVIDIA");
-        // Success - write to .env
-        const mergedConfig: MintConfig = {
-          apiKey: connectConfig.apiKey!,
-          baseUrl: connectConfig.baseUrl!,
-          preferredModel: connectConfig.preferredModel || "",
-          maxToolRounds: agentLimits.maxToolRounds,
-          maxToolCallsPerTurn: agentLimits.maxToolCallsPerTurn,
-        };
-        writeDotEnv(mergedConfig);
-        // Update running client
-        client = testClient;
-        configuredModel = mergedConfig.preferredModel;
-        agentLimits = { maxToolRounds: mergedConfig.maxToolRounds, maxToolCallsPerTurn: mergedConfig.maxToolCallsPerTurn };
-        setModel(mergedConfig.preferredModel || list[0].id);
-        setModels(list);
-        setStatus("connected");
-        setNotice(`NVIDIA connected ✓ (${list.length} models)`);
-        setMessages((old) => [...old, { role: "assistant", content: `Connected to NVIDIA. Settings saved to .env ♡\nActive model: ${mergedConfig.preferredModel || list[0].id}` }]);
-      } catch (e) {
-        setStatus("error");
-        setNotice("connection failed: " + (e instanceof Error ? e.message : String(e)));
-        setMessages((old) => [...old, { role: "assistant", content: `Connection test failed: ${e instanceof Error ? e.message : e}` }]);
-      }
-      setConnectStep("idle");
-      connectConfig = {};
-      return;
+
+    setConnectBusy(true);
+    setConnectError("");
+    connectAbort = new AbortController();
+
+    try {
+      const testClient = new NvidiaClient(apiKey, baseUrl);
+      const list = await testClient.listModels(connectAbort.signal);
+      if (list.length === 0) throw new Error("No models returned from NVIDIA");
+
+      const resolvedModel = resolveConnectModel(model, configuredModel, list.map((m) => m.id));
+      const mergedConfig: MintConfig = {
+        apiKey,
+        baseUrl,
+        preferredModel: resolvedModel,
+        maxToolRounds: agentLimits.maxToolRounds,
+        maxToolCallsPerTurn: agentLimits.maxToolCallsPerTurn,
+      };
+      writeDotEnv(mergedConfig);
+
+      client = testClient;
+      configuredModel = mergedConfig.preferredModel;
+      agentLimits = { maxToolRounds: mergedConfig.maxToolRounds, maxToolCallsPerTurn: mergedConfig.maxToolCallsPerTurn };
+      setModel(mergedConfig.preferredModel || list[0].id);
+      setModels(list);
+      setStatus("connected");
+      setNotice(`NVIDIA connected ✓ (${list.length} models)`);
+      showToast(`Connected to NVIDIA ✓ (${list.length} models)`);
+      closeConnectPopup();
+    } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") return;
+      setConnectError(e instanceof Error ? e.message : String(e));
+      showToast("Connection failed: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setConnectBusy(false);
+      connectAbort = undefined;
     }
   };
 
@@ -372,14 +554,6 @@ function App() {
   const send = async () => {
     const rawText = input();
     const text = rawText.trim();
-
-    // Handle connect flow input (before clearing input)
-    if (connectStep() !== "idle") {
-      await handleConnectFlow(text);
-      setInput("");
-      setCursorPos(0);
-      return;
-    }
 
     // Handle session picker input
     if (sessionPickerOpen()) {
@@ -515,7 +689,7 @@ No file has been changed. Review this preview, then type /apply to approve or /r
       return;
     }
     if (text === "/connect") {
-      startConnectFlow();
+      openConnectPopup();
       return;
     }
     if (text === "/session" || text.startsWith("/session ")) {
@@ -796,20 +970,102 @@ No file has been changed. Review this preview, then type /apply to approve or /r
   }, 650);
   onCleanup(() => clearInterval(catAnimationTimer));
 
+  // Paste handler (terminal bracketed paste)
+  usePaste((event) => {
+    if (catMenuOpen() || sessionPickerOpen() || connectOpen()) return;
+    pasteEventCounter++;
+    const text = stripAnsiSequences(decodePasteBytes(event.bytes));
+    const { text: sanitized, truncated } = sanitizePastedText(text);
+    if (!sanitized) return;
+    const { value: newValue, cursor: newCursor } = insertAtCursor(input(), cursorPos(), sanitized);
+    setInput(newValue);
+    setCursorPos(newCursor);
+    if (truncated) showToast(`Paste truncated to ${MAX_PASTE_CHARS} chars`);
+  });
+
+  // Selection handler (mouse selection auto-copy)
+  useSelectionHandler((selection) => {
+    if (!selection || !selection.isActive) return;
+    const selectedText = selection.getSelectedText();
+    if (!selectedText || !selectedText.trim()) return;
+    if (selectedText === lastAutoCopyText) return;
+    lastAutoCopyText = selectedText;
+    copyText(selectedText).then((ok) => {
+      if (ok) showToast(`♡ copied ${selectedText.length} chars`);
+    });
+  });
+
   useKeyboard((key) => {
     const value = input();
     const pos = cursorPos();
     const suggestions = commandSuggestions();
-    // Handle escape during connect flow
-    if (connectStep() !== "idle" && key.name === "escape") {
-      setConnectStep("idle");
-      connectConfig = {};
-      setInput("");
-      setCursorPos(0);
-      setMessages((old) => [...old, { role: "assistant", content: "Connection setup cancelled." }]);
-      setNotice("connection setup cancelled");
+
+    // Handle connect popup keys first
+    if (connectOpen()) {
+      void handleConnectKey(key);
       return;
     }
+
+    // Global copy/paste shortcuts (work when not in popup)
+    if (!connectOpen() && !sessionPickerOpen() && !catMenuOpen()) {
+      // Ctrl+Shift+V or Ctrl+V or Shift+Insert - paste from clipboard
+      if (((key.ctrl && key.shift && key.name === "v") || (key.ctrl && key.name === "v") || (key.name === "insert" && key.shift)) && !key.meta) {
+        void readClipboardText().then((text) => {
+          if (text) {
+            const { text: sanitized, truncated } = sanitizePastedText(text);
+            if (sanitized) {
+              const { value: newValue, cursor: newCursor } = insertAtCursor(input(), cursorPos(), sanitized);
+              setInput(newValue);
+              setCursorPos(newCursor);
+              if (truncated) showToast(`Paste truncated to ${MAX_PASTE_CHARS} chars`);
+            }
+          }
+        });
+        return;
+      }
+      // Ctrl+Shift+C - copy selection (or show nothing selected)
+      if (key.ctrl && key.shift && key.name === "c") {
+        if (renderer.hasSelection) {
+          const selection = renderer.getSelection();
+          const selectedText = selection?.getSelectedText() || "";
+          if (selectedText) {
+            void copyText(selectedText).then((ok) => {
+              if (ok) showToast(`♡ copied ${selectedText.length} chars`);
+              else showToast("Copy failed");
+              renderer.clearSelection();
+            });
+          } else {
+            showToast("Nothing selected");
+          }
+        } else {
+          showToast("Nothing selected");
+        }
+        return;
+      }
+      // Ctrl+C - copy if selection exists, otherwise abort/exit
+      if (key.ctrl && !key.shift && key.name === "c") {
+        if (renderer.hasSelection) {
+          const selection = renderer.getSelection();
+          const selectedText = selection?.getSelectedText() || "";
+          if (selectedText) {
+            void copyText(selectedText).then((ok) => {
+              if (ok) showToast(`♡ copied ${selectedText.length} chars`);
+              else showToast("Copy failed");
+              renderer.clearSelection();
+            });
+            return;
+          }
+        }
+        if (activeController) {
+          activeController.abort();
+        } else {
+          store.close();
+          renderer.destroy();
+        }
+        return;
+      }
+    }
+
     if (sessionPickerOpen()) {
       if (key.name === "escape") { setSessionPickerOpen(false); setMessages((old) => [...old, { role: "assistant", content: "Session picker closed." }]); setNotice("session picker closed"); return; }
       if (key.name === "up") { setSessionPickerIndex((old) => (old - 1 + store.listSessions().length) % store.listSessions().length); return; }
@@ -853,11 +1109,6 @@ No file has been changed. Review this preview, then type /apply to approve or /r
       return;
     }
     if (key.name === "f2") { setCatMenuOpen(true); setCatMenuIndex(0); return; }
-    if (key.ctrl && !key.shift && key.name === "c") {
-      if (activeController) activeController.abort();
-      else { store.close(); renderer.destroy(); }
-      return;
-    }
     if (key.name === "up" && suggestions.length) {
       setCommandIndex((old) => (old - 1 + suggestions.length) % suggestions.length);
       return;
@@ -1154,6 +1405,122 @@ No file has been changed. Review this preview, then type /apply to approve or /r
       </box>
       <Show when={terminal().height >= 24 && commandSuggestions().length === 0}>
         <text fg={colors.muted} width="100%" minWidth={0} flexShrink={0} wrapMode="none" truncate={true}>{footerText()}</text>
+      </Show>
+
+      {/* Top-right toast notification */}
+      <Show when={toast() !== null}>
+        <box
+          position="absolute"
+          top={1}
+          right={2}
+          zIndex={50}
+          backgroundColor={colors.panel}
+          borderStyle="rounded"
+          borderColor={colors.mint}
+          paddingLeft={1}
+          paddingRight={1}
+        >
+          <text fg={colors.mint} wrapMode="none" truncate={true} width={40}>{toast()}</text>
+        </box>
+      </Show>
+
+      {/* Connect popup */}
+      <Show when={connectOpen()}>
+        <box
+          position="absolute"
+          top={Math.max(2, Math.floor(terminal().height / 2) - 10)}
+          left={Math.max(2, Math.floor((terminal().width - Math.min(72, terminal().width - 4)) / 2))}
+          width={Math.min(72, terminal().width - 4)}
+          minWidth={40}
+          backgroundColor={colors.panel}
+          borderStyle="rounded"
+          borderColor={colors.pink}
+          padding={1}
+          gap={1}
+          flexShrink={0}
+        >
+          <text fg={colors.pink} wrapMode="none" width="100%">✿ CONNECT NVIDIA</text>
+          <box flexDirection="column" gap={1} width="100%">
+            <box flexDirection="row" gap={1} width="100%" minWidth={0}>
+              <text fg={connectField() === "apiKey" ? colors.pink : colors.muted} wrapMode="none" width={8}>API KEY</text>
+              <box
+                flexGrow={1}
+                minWidth={0}
+                backgroundColor={colors.bg}
+                borderStyle="single"
+                borderColor={connectField() === "apiKey" ? colors.pink : colors.muted}
+                paddingLeft={1}
+                paddingRight={1}
+                overflow="hidden"
+              >
+                <text
+                  fg={colors.text}
+                  wrapMode="none"
+                  width="100%"
+                  minWidth={0}
+                  truncate={true}
+                >
+                  {maskSecret(connectFieldValue("apiKey")).slice(Math.max(0, connectFieldCursor("apiKey") - 36))}▌
+                </text>
+              </box>
+            </box>
+            <box flexDirection="row" gap={1} width="100%" minWidth={0}>
+              <text fg={connectField() === "baseUrl" ? colors.pink : colors.muted} wrapMode="none" width={8}>BASE URL</text>
+              <box
+                flexGrow={1}
+                minWidth={0}
+                backgroundColor={colors.bg}
+                borderStyle="single"
+                borderColor={connectField() === "baseUrl" ? colors.pink : colors.muted}
+                paddingLeft={1}
+                paddingRight={1}
+                overflow="hidden"
+              >
+                <text
+                  fg={colors.text}
+                  wrapMode="none"
+                  width="100%"
+                  minWidth={0}
+                  truncate={true}
+                >
+                  {connectFieldValue("baseUrl").slice(Math.max(0, connectFieldCursor("baseUrl") - 36))}▌
+                </text>
+              </box>
+            </box>
+            <box flexDirection="row" gap={1} width="100%" minWidth={0}>
+              <text fg={connectField() === "model" ? colors.pink : colors.muted} wrapMode="none" width={8}>MODEL</text>
+              <box
+                flexGrow={1}
+                minWidth={0}
+                backgroundColor={colors.bg}
+                borderStyle="single"
+                borderColor={connectField() === "model" ? colors.pink : colors.muted}
+                paddingLeft={1}
+                paddingRight={1}
+                overflow="hidden"
+              >
+                <text
+                  fg={colors.text}
+                  wrapMode="none"
+                  width="100%"
+                  minWidth={0}
+                  truncate={true}
+                >
+                  {connectFieldValue("model").slice(Math.max(0, connectFieldCursor("model") - 36))}▌
+                </text>
+              </box>
+            </box>
+          </box>
+          <Show when={connectError()}>
+            <text fg={colors.red} wrapMode="none" width="100%" minWidth={0} truncate={true}>{connectError()}</text>
+          </Show>
+          <Show when={connectBusy()}>
+            <text fg={colors.peach} wrapMode="none" width="100%" minWidth={0} truncate={true}>· testing connection… (Esc to cancel)</text>
+          </Show>
+          <Show when={!connectBusy()}>
+            <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>Tab next · Shift+Tab prev · Enter connect · Esc cancel · Ctrl+Shift+V paste</text>
+          </Show>
+        </box>
       </Show>
     </box>
   );

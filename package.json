@@ -8,7 +8,7 @@
     "dev": "bun --conditions=development src/index.tsx",
     "start": "bun src/index.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "bun test tests/agent-loop.test.ts tests/agent-tools.test.ts tests/cat.test.ts tests/config.test.ts tests/nvidia.test.ts tests/storage.test.ts tests/terminal.test.ts tests/tools.test.ts",
+    "test": "bun test tests/agent-loop.test.ts tests/agent-tools.test.ts tests/cat.test.ts tests/config.test.ts tests/nvidia.test.ts tests/storage.test.ts tests/terminal.test.ts tests/tools.test.ts tests/connect.test.ts",
     "check:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows.ps1"
   },
   "dependencies": {

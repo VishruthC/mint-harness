@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, renameSync, copyFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, renameSync, copyFileSync, unlinkSync, chmodSync } from "node:fs";
 import { z } from "zod";
 import { DEFAULT_AGENT_LOOP_LIMITS } from "./agent-loop";
 
@@ -67,21 +67,48 @@ export function loadConfig(env?: Record<string, string | undefined>): MintConfig
   };
 }
 
+const MINT_KEYS = [
+  "NVIDIA_API_KEY",
+  "NVIDIA_BASE_URL",
+  "NVIDIA_MODEL",
+  "MINT_MAX_TOOL_ROUNDS",
+  "MINT_MAX_TOOL_CALLS_PER_TURN",
+] as const;
+
 export function writeDotEnv(config: MintConfig, path = ".env"): void {
-  const lines = [
-    `NVIDIA_API_KEY="${config.apiKey}"`,
-    `NVIDIA_BASE_URL="${config.baseUrl}"`,
-    config.preferredModel ? `NVIDIA_MODEL="${config.preferredModel}"` : "",
+  let existingLines: string[] = [];
+  if (existsSync(path)) {
+    existingLines = readFileSync(path, "utf8").split(/\r?\n/);
+  }
+
+  const otherLines = existingLines.filter((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) return true;
+    const keyMatch = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+    return keyMatch && !MINT_KEYS.includes(keyMatch[1] as typeof MINT_KEYS[number]);
+  });
+
+  const newLines = [
+    `NVIDIA_API_KEY="${config.apiKey.replace(/"/g, '\\"')}"`,
+    `NVIDIA_BASE_URL="${config.baseUrl.replace(/"/g, '\\"')}"`,
+    config.preferredModel ? `NVIDIA_MODEL="${config.preferredModel.replace(/"/g, '\\"')}"` : "",
     `MINT_MAX_TOOL_ROUNDS=${config.maxToolRounds}`,
     `MINT_MAX_TOOL_CALLS_PER_TURN=${config.maxToolCallsPerTurn}`,
-  ].filter(Boolean).join("\n") + "\n";
+  ].filter(Boolean);
+
+  const output = [...otherLines, ...newLines].filter(Boolean).join("\n") + "\n";
 
   const tmp = `${path}.tmp.${crypto.randomUUID()}`;
-  writeFileSync(tmp, lines, "utf8");
+  writeFileSync(tmp, output, "utf8");
   try {
     renameSync(tmp, path);
   } catch {
     copyFileSync(tmp, path);
     unlinkSync(tmp);
+  }
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    // Some platforms don't support POSIX file modes
   }
 }

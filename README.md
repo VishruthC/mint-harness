@@ -27,20 +27,47 @@ MINT uses `https://integrate.api.nvidia.com/v1` by default. Set `NVIDIA_MODEL` t
 
 - `/help` — show available commands
 - `/models` — refresh and list NVIDIA models
-- `/model <id>` — select a model
-- `/new` — start a new persistent session
-- `/sessions` — list recent sessions
-- `/resume <id>` — resume a saved session
+- `/model <id>` — select a model (session only)
+- `/connect` — configure NVIDIA API credentials (opens secure popup)
+- `/session` — list or resume sessions (interactive picker)
+- `/session new` — start a fresh session
+- `/session delete <id>` — delete a session
 - `/cancel` — cancel an in-progress response
 - `/clear` — start a fresh session (old sessions remain saved)
 - `/quit` — exit MINT
 - `Shift+Enter` — insert a newline; `Enter` sends
+
+### Clipboard shortcuts
+
+- `Ctrl+Shift+V` / `Ctrl+V` / `Shift+Insert` — paste from system clipboard
+- `Ctrl+Shift+C` — copy current selection (shows toast notification)
+- `Ctrl+C` — copy selection if one exists, otherwise abort/exit
+- Mouse selection — automatically copies to clipboard on release
+
+### Secure `/connect` popup
+
+`/connect` opens a centered in-TUI popup for API key entry:
+
+- API key input is **always masked** (shows `•` characters)
+- Paste your key with `Ctrl+Shift+V` — the raw key never appears in chat history, logs, or SQLite
+- Tab/Shift+Tab to navigate between API Key, Base URL, and Model fields
+- Enter to test connection and save to `.env`; Esc to cancel
+- Connection is validated against NVIDIA before writing
 
 No local-model or alternate-cloud-provider setup is included.
 
 ## Session storage
 
 Conversation history is stored in SQLite at `~/.mint/mint.sqlite` by default. Set `MINT_DATA_DIR` to change the data directory. The directory is created with restrictive permissions and the database file is set to owner-only permissions where supported. Back up this file if you want to preserve sessions.
+
+### Session management
+
+- `/session` — opens interactive picker (↑/↓ to navigate, Enter to resume, Esc to cancel, or type 1-9)
+- `/session <id>` — resume a specific session directly
+- `/session new` — create a fresh session
+- `/session delete <id>` — remove a saved session
+
+Each session stores its own model selection, which is restored on resume.
 
 ## Security notes
 
