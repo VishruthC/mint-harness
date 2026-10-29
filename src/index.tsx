@@ -1,6 +1,6 @@
 import { render, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid";
 import { For, Show, createMemo, createSignal, onCleanup } from "solid-js";
-import { loadConfig } from "./config";
+import { loadConfig, writeDotEnv, type MintConfig } from "./config";
 import { AgentTurnBudget, formatLimitMessage, RepeatedCallGuard } from "./agent-loop";
 import { NvidiaClient, type ChatMessage, type NvidiaModel, type ToolCall } from "./nvidia";
 import { buildSystemPrompt, executeModelTool, getCapabilities, getModelTools } from "./agent-tools";
@@ -43,9 +43,10 @@ function App() {
     { command: "/models", description: "List NVIDIA models" },
     { command: "/retry", description: "Retry the last user message" },
     { command: "/model ", description: "Choose a model" },
-    { command: "/new", description: "Start a new session" },
-    { command: "/sessions", description: "List saved sessions" },
-    { command: "/resume ", description: "Resume a session by ID" },
+    { command: "/connect", description: "Configure NVIDIA API credentials" },
+    { command: "/session", description: "List or resume sessions" },
+    { command: "/session new", description: "Start a fresh session" },
+    { command: "/session delete ", description: "Delete a session" },
     { command: "/workspace", description: "Show workspace root" },
     { command: "/capabilities", description: "Show real harness capabilities" },
     { command: "/project", description: "Inspect project type, manifests, README, and .gitignore" },
@@ -95,6 +96,15 @@ function App() {
   const [catMenuIndex, setCatMenuIndex] = createSignal(0);
   const [catExpressionPicker, setCatExpressionPicker] = createSignal(false);
   const [catExpressionIndex, setCatExpressionIndex] = createSignal(0);
+
+  // Connect flow state
+  const [connectStep, setConnectStep] = createSignal<"idle" | "apikey" | "baseurl" | "model" | "testing">("idle");
+  let connectConfig: Partial<MintConfig> = {};
+
+  // Session picker state
+  const [sessionPickerOpen, setSessionPickerOpen] = createSignal(false);
+  const [sessionPickerIndex, setSessionPickerIndex] = createSignal(0);
+
   const catMenuItems = [
     { label: "Pet the cat", shortcut: "1", detail: "Give MINT some affection" },
     { label: "Feed a treat", shortcut: "2", detail: "Spend a pixel treat" },
@@ -223,10 +233,164 @@ function App() {
     }
   };
 
+  // Connect flow handlers
+  const startConnectFlow = () => {
+    setConnectStep("apikey");
+    connectConfig = {};
+    setMessages((old) => [...old, { role: "assistant", content: "NVIDIA API Setup\nEnter your API key (input will be masked):" }]);
+    setNotice("enter NVIDIA_API_KEY");
+  };
+
+  const handleConnectFlow = async (text: string) => {
+    const step = connectStep();
+    if (step === "apikey") {
+      connectConfig.apiKey = text;
+      if (!text || text.trim().length < 10) {
+        setMessages((old) => [...old, { role: "assistant", content: "Invalid API key. Please enter a valid NVIDIA API key." }]);
+        return;
+      }
+      setConnectStep("baseurl");
+      setMessages((old) => [...old, { role: "assistant", content: `Enter base URL (default: https://integrate.api.nvidia.com/v1):` }]);
+      setNotice("enter base URL or press Enter for default");
+      return;
+    }
+    if (step === "baseurl") {
+      connectConfig.baseUrl = text || "https://integrate.api.nvidia.com/v1";
+      setConnectStep("model");
+      setMessages((old) => [...old, { role: "assistant", content: `Enter model ID (optional, press Enter to skip):` }]);
+      setNotice("enter model ID or press Enter to skip");
+      return;
+    }
+    if (step === "model") {
+      connectConfig.preferredModel = text || undefined;
+      setConnectStep("testing");
+      setNotice("testing connection…");
+      try {
+        const testClient = new NvidiaClient(connectConfig.apiKey!, connectConfig.baseUrl!);
+        const list = await testClient.listModels();
+        if (list.length === 0) throw new Error("No models returned from NVIDIA");
+        // Success - write to .env
+        const mergedConfig: MintConfig = {
+          apiKey: connectConfig.apiKey!,
+          baseUrl: connectConfig.baseUrl!,
+          preferredModel: connectConfig.preferredModel || "",
+          maxToolRounds: agentLimits.maxToolRounds,
+          maxToolCallsPerTurn: agentLimits.maxToolCallsPerTurn,
+        };
+        writeDotEnv(mergedConfig);
+        // Update running client
+        client = testClient;
+        configuredModel = mergedConfig.preferredModel;
+        agentLimits = { maxToolRounds: mergedConfig.maxToolRounds, maxToolCallsPerTurn: mergedConfig.maxToolCallsPerTurn };
+        setModel(mergedConfig.preferredModel || list[0].id);
+        setModels(list);
+        setStatus("connected");
+        setNotice(`NVIDIA connected ✓ (${list.length} models)`);
+        setMessages((old) => [...old, { role: "assistant", content: `Connected to NVIDIA. Settings saved to .env ♡\nActive model: ${mergedConfig.preferredModel || list[0].id}` }]);
+      } catch (e) {
+        setStatus("error");
+        setNotice("connection failed: " + (e instanceof Error ? e.message : String(e)));
+        setMessages((old) => [...old, { role: "assistant", content: `Connection test failed: ${e instanceof Error ? e.message : e}` }]);
+      }
+      setConnectStep("idle");
+      connectConfig = {};
+      return;
+    }
+  };
+
+  // Session command handlers
+  const handleSessionCommand = async (text: string) => {
+    const parts = text.trim().split(/\s+/);
+    const sub = parts[1] || "";
+    if (!sub || sub === "list") {
+      openSessionPicker();
+      return;
+    }
+    if (sub === "new") {
+      startNewSession();
+      return;
+    }
+    if (sub === "delete" && parts[2]) {
+      const id = parts[2];
+      store.deleteSession(id);
+      setMessages((old) => [...old, { role: "assistant", content: `Session ${id} deleted.` }]);
+      setNotice(`session ${id} deleted`);
+      return;
+    }
+    // Treat as session ID to resume
+    resumeSession(sub);
+  };
+
+  const openSessionPicker = () => {
+    setSessionPickerOpen(true);
+    setSessionPickerIndex(0);
+    const sessions = store.listSessions();
+    if (sessions.length === 0) {
+      setMessages((old) => [...old, { role: "assistant", content: "No saved sessions yet. Use /session new to create one." }]);
+      setSessionPickerOpen(false);
+      return;
+    }
+    const listing = sessions.map((s, i) => `${i + 1}. ${s.id}  ${s.title}  [${s.model || "no model"}]  ${new Date(s.created_at).toLocaleString()}`).join("\n");
+    setMessages((old) => [...old, { role: "assistant", content: `Sessions (↑/↓ to navigate, Enter to resume, Esc to cancel):\n${listing}` }]);
+    setNotice("session picker open");
+  };
+
+  const handleSessionPickerInput = async (text: string) => {
+    // In the picker, we interpret input as navigation or direct selection
+    const sessions = store.listSessions();
+    if (text === "escape" || text === "esc") {
+      setSessionPickerOpen(false);
+      setMessages((old) => [...old, { role: "assistant", content: "Session picker closed." }]);
+      setNotice("session picker closed");
+      return;
+    }
+    if (text === "up" || text === "k") {
+      setSessionPickerIndex((old) => (old - 1 + sessions.length) % sessions.length);
+      return;
+    }
+    if (text === "down" || text === "j") {
+      setSessionPickerIndex((old) => (old + 1) % sessions.length);
+      return;
+    }
+    if (text === "enter" || text === "") {
+      const selected = sessions[sessionPickerIndex()];
+      if (selected) {
+        setSessionPickerOpen(false);
+        resumeSession(selected.id);
+      }
+      return;
+    }
+    // Allow direct number entry
+    const num = parseInt(text, 10);
+    if (!isNaN(num) && num >= 1 && num <= sessions.length) {
+      setSessionPickerOpen(false);
+      resumeSession(sessions[num - 1].id);
+      return;
+    }
+  };
+
   const send = async () => {
     const rawText = input();
     const text = rawText.trim();
+
+    // Handle connect flow input (before clearing input)
+    if (connectStep() !== "idle") {
+      await handleConnectFlow(text);
+      setInput("");
+      setCursorPos(0);
+      return;
+    }
+
+    // Handle session picker input
+    if (sessionPickerOpen()) {
+      await handleSessionPickerInput(text);
+      setInput("");
+      setCursorPos(0);
+      return;
+    }
+
     if ((!text && !awaitingWritePath) || (busy() && text !== "/cancel")) return;
+
     setInput("");
     setCursorPos(0);
 
@@ -350,14 +514,12 @@ No file has been changed. Review this preview, then type /apply to approve or /r
       startNewSession();
       return;
     }
-    if (text === "/sessions") {
-      const sessions = store.listSessions();
-      const listing = sessions.map((item) => `${item.id}  ${item.title}  [${item.model || "no model"}]`).join("\n");
-      setMessages((old) => [...old, { role: "assistant", content: `Recent sessions:\n${listing || "No saved sessions yet."}\n\nResume with /resume <id>.` }]);
+    if (text === "/connect") {
+      startConnectFlow();
       return;
     }
-    if (text.startsWith("/resume ")) {
-      resumeSession(text.slice(8).trim());
+    if (text === "/session" || text.startsWith("/session ")) {
+      await handleSessionCommand(text);
       return;
     }
     if (text === "/workspace") {
@@ -443,13 +605,20 @@ No file has been changed. Review this preview, then type /apply to approve or /r
     if (text === "/help") {
       setMessages((old) => [...old, {
         role: "assistant",
-        content: "Commands: /help · /cat · /pet · /feed · /expressions · /expression <id> · /models · /model <id> · /new · /sessions · /resume <id> · /workspace · /project · /capabilities · /ls [path] · /read <path> · /search <text> · /propose <path> · /apply · /reject · /command <program args> · /run · /reject-command · /cancel · /clear · /quit\n\nFile changes require explicit /apply approval. Terminal commands are restricted, previewed, and run only after explicit /run approval. Web browsing remains unavailable.",
+        content: "Commands: /help · /cat · /pet · /feed · /expressions · /expression <id> · /models · /model <id> · /connect · /session · /session new · /session delete <id> · /workspace · /project · /capabilities · /ls [path] · /read <path> · /search <text> · /propose <path> · /apply · /reject · /command <program args> · /run · /reject-command · /cancel · /clear · /quit\n\nFile changes require explicit /apply approval. Terminal commands are restricted, previewed, and run only after explicit /run approval. Web browsing remains unavailable.",
       }]);
       return;
     }
     if (text === "/models") {
       await refreshModels();
-      setMessages((old) => [...old, { role: "assistant", content: `Available NVIDIA models:\n${models().map((m) => `• ${m.id}`).join("\n") || notice()}` }]);
+      const modelList = models();
+      if (modelList.length === 0) {
+        setMessages((old) => [...old, { role: "assistant", content: `No models available. Check your NVIDIA API key and connection.` }]);
+        return;
+      }
+      const current = model();
+      const listing = modelList.map((m) => `${m.id === current ? "→ " : "  "}${m.id}${m.id === current ? " (current)" : ""}`).join("\n");
+      setMessages((old) => [...old, { role: "assistant", content: `Available NVIDIA models:\n${listing}\n\nUse /model <id> to switch.` }]);
       return;
     }
     if (text.startsWith("/model ")) {
@@ -459,7 +628,7 @@ No file has been changed. Review this preview, then type /apply to approve or /r
         setModel(found.id);
         store.updateModel(session(), found.id);
         setNotice(`Model set to ${found.id}`);
-        setMessages((old) => [...old, { role: "assistant", content: `♡ Model set to ${found.id}` }]);
+        setMessages((old) => [...old, { role: "assistant", content: `♡ Model set to ${found.id} (session only). Use /connect to persist to .env.` }]);
       } else {
         setMessages((old) => [...old, { role: "assistant", content: `I can't find that model in the current NVIDIA catalog. Try /models first.` }]);
       }
@@ -631,6 +800,35 @@ No file has been changed. Review this preview, then type /apply to approve or /r
     const value = input();
     const pos = cursorPos();
     const suggestions = commandSuggestions();
+    // Handle escape during connect flow
+    if (connectStep() !== "idle" && key.name === "escape") {
+      setConnectStep("idle");
+      connectConfig = {};
+      setInput("");
+      setCursorPos(0);
+      setMessages((old) => [...old, { role: "assistant", content: "Connection setup cancelled." }]);
+      setNotice("connection setup cancelled");
+      return;
+    }
+    if (sessionPickerOpen()) {
+      if (key.name === "escape") { setSessionPickerOpen(false); setMessages((old) => [...old, { role: "assistant", content: "Session picker closed." }]); setNotice("session picker closed"); return; }
+      if (key.name === "up") { setSessionPickerIndex((old) => (old - 1 + store.listSessions().length) % store.listSessions().length); return; }
+      if (key.name === "down") { setSessionPickerIndex((old) => (old + 1) % store.listSessions().length); return; }
+      if (key.name === "return") {
+        const sessions = store.listSessions();
+        const selected = sessions[sessionPickerIndex()];
+        if (selected) { setSessionPickerOpen(false); resumeSession(selected.id); }
+        return;
+      }
+      // Allow number keys 1-9 for direct selection
+      const num = parseInt(key.sequence || "", 10);
+      if (!isNaN(num) && num >= 1 && num <= 9) {
+        const sessions = store.listSessions();
+        if (num <= sessions.length) { setSessionPickerOpen(false); resumeSession(sessions[num - 1].id); }
+        return;
+      }
+      return;
+    }
     if (catMenuOpen()) {
       if (catExpressionPicker()) {
         if (key.name === "escape") { setCatExpressionPicker(false); return; }

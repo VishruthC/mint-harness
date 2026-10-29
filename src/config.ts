@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, renameSync, copyFileSync, unlinkSync } from "node:fs";
 import { z } from "zod";
 import { DEFAULT_AGENT_LOOP_LIMITS } from "./agent-loop";
 
@@ -65,4 +65,23 @@ export function loadConfig(env?: Record<string, string | undefined>): MintConfig
     maxToolRounds: parsed.data.MINT_MAX_TOOL_ROUNDS,
     maxToolCallsPerTurn: parsed.data.MINT_MAX_TOOL_CALLS_PER_TURN,
   };
+}
+
+export function writeDotEnv(config: MintConfig, path = ".env"): void {
+  const lines = [
+    `NVIDIA_API_KEY="${config.apiKey}"`,
+    `NVIDIA_BASE_URL="${config.baseUrl}"`,
+    config.preferredModel ? `NVIDIA_MODEL="${config.preferredModel}"` : "",
+    `MINT_MAX_TOOL_ROUNDS=${config.maxToolRounds}`,
+    `MINT_MAX_TOOL_CALLS_PER_TURN=${config.maxToolCallsPerTurn}`,
+  ].filter(Boolean).join("\n") + "\n";
+
+  const tmp = `${path}.tmp.${crypto.randomUUID()}`;
+  writeFileSync(tmp, lines, "utf8");
+  try {
+    renameSync(tmp, path);
+  } catch {
+    copyFileSync(tmp, path);
+    unlinkSync(tmp);
+  }
 }
