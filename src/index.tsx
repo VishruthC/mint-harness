@@ -1,6 +1,6 @@
 import { render, useKeyboard, useRenderer, useTerminalDimensions, usePaste, useSelectionHandler } from "@opentui/solid";
 import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { loadConfig, writeDotEnv, type MintConfig } from "./config";
+import { loadConfig, writeDotEnv, updateDotEnvModel, type MintConfig } from "./config";
 import { AgentTurnBudget, formatLimitMessage, RepeatedCallGuard } from "./agent-loop";
 import { NvidiaClient, type ChatMessage, type NvidiaModel, type ToolCall } from "./nvidia";
 import { buildSystemPrompt, executeModelTool, getCapabilities, getModelTools } from "./agent-tools";
@@ -20,6 +20,21 @@ import {
   resolveConnectModel,
   type ConnectField,
 } from "./connect";
+import {
+  MAX_SESSION_TITLE,
+  normalizeSessionTitle,
+  deriveTitleFromMessage,
+} from "./session";
+import {
+  filterModels,
+  mergeCurrentModel,
+  movePickerIndex,
+  pagePickerIndex,
+  homeEndIndex,
+  visibleWindow,
+  findModel,
+  isValidModelId,
+} from "./models";
 import { createHostClipboard, createClipboard, createRendererClipboardAdapter, decodePasteBytes, stripAnsiSequences } from "@opentui/core";
 
 const colors = {
@@ -53,12 +68,13 @@ function App() {
     { command: "/expressions", description: "View and unlock cat expressions" },
     { command: "/expression ", description: "Equip an unlocked cat expression" },
     { command: "/models", description: "List NVIDIA models" },
+    { command: "/model", description: "Choose a model (opens picker)" },
     { command: "/retry", description: "Retry the last user message" },
-    { command: "/model ", description: "Choose a model" },
     { command: "/connect", description: "Configure NVIDIA API credentials" },
     { command: "/session", description: "List or resume sessions" },
     { command: "/session new", description: "Start a fresh session" },
     { command: "/session delete ", description: "Delete a session" },
+    { command: "/session rename ", description: "Rename the active session" },
     { command: "/workspace", description: "Show workspace root" },
     { command: "/capabilities", description: "Show real harness capabilities" },
     { command: "/project", description: "Inspect project type, manifests, README, and .gitignore" },
@@ -79,10 +95,6 @@ function App() {
     const value = input().trimStart();
     if (!value.startsWith("/")) return [];
     // Once an argument starts, suggestions should not cover the input or steal navigation.
-    if (value.startsWith("/model ")) {
-      const query = value.slice(7).trim().toLowerCase();
-      return models().filter((entry) => entry.id.toLowerCase().includes(query)).slice(0, commandLimit()).map((entry) => ({ command: `/model ${entry.id}`, description: "Select this model" }));
-    }
     if (value.includes(" ")) return [];
     // Keep the picker compact; typing filters the complete command list.
     return commands.filter((item) => item.command.trim().startsWith(value)).slice(0, commandLimit());
@@ -208,12 +220,27 @@ function App() {
     if (toastTimer) clearTimeout(toastTimer);
   });
 
-  const [session, setSession] = createSignal(store.createSession().id);
+  // Session state - lazy creation
+  const [session, setSession] = createSignal<string | null>(null);
+  const [draftSessionTitle, setDraftSessionTitle] = createSignal<string>("");
   let client: NvidiaClient | undefined;
   let configuredModel = "";
   let lastUserPrompt = "";
   let activeController: AbortController | undefined;
   const sidebarVisible = () => terminal().width >= 100;
+
+  // Model picker state
+  const [modelPickerOpen, setModelPickerOpen] = createSignal(false);
+  const [modelPickerQuery, setModelPickerQuery] = createSignal("");
+  const [modelPickerIndex, setModelPickerIndex] = createSignal(0);
+  const [modelPickerBusy, setModelPickerBusy] = createSignal(false);
+  const [modelPickerError, setModelPickerError] = createSignal<string | null>(null);
+  let modelPickerAbort: AbortController | undefined;
+
+  // Session rename popup state
+  const [renameOpen, setRenameOpen] = createSignal(false);
+  const [renameDraft, setRenameDraft] = createSignal("");
+  const [renameError, setRenameError] = createSignal("");
   // Approximate usable text width inside the chat input box after outer padding,
   // the optional sidebar, and panel/input padding. Used to pick compact copy.
   const chatWidth = () => Math.max(0, terminal().width - (sidebarVisible() ? 37 : 6));
@@ -236,22 +263,45 @@ function App() {
   const commandPaletteHeader = () =>
     terminal().width >= 64 ? "COMMANDS  ·  ↑/↓ select  ·  Tab complete" : "COMMANDS  ·  ↑/↓  ·  Tab";
 
-  const persist = (message: StoredMessage) => store.addMessage(session(), message);
-  const startNewSession = () => {
-    const created = store.createSession(model());
-    setSession(created.id);
-    setHistory([systemMessage()]);
-    setMessages([{ role: "assistant", content: `Fresh session ${created.id}! What are we building? ♡` }]);
-    setNotice(`session ${created.id}`);
+  const getSessionTitle = () => {
+    const sid = session();
+    if (sid) {
+      const s = store.getSession(sid);
+      return s?.title || "unnamed";
+    }
+    return draftSessionTitle() || "new session";
   };
+
+  const persist = (message: StoredMessage) => {
+    const sid = session();
+    if (sid) {
+      store.addMessage(sid, message);
+    } else {
+      // First message - create session with the message
+      const newSession = store.createSessionWithMessage(model(), message, draftSessionTitle() || undefined);
+      setSession(newSession.id);
+      setDraftSessionTitle("");
+    }
+  };
+
+  const startNewSession = () => {
+    setSession(null);
+    setDraftSessionTitle("");
+    setHistory([systemMessage()]);
+    setMessages([{ role: "assistant", content: `Fresh session! Send a message to save it. ♡` }]);
+    setNotice("draft session ready");
+    lastUserPrompt = "";
+  };
+
   const resumeSession = (id: string) => {
     const found = store.getSession(id);
     if (!found) {
-      setMessages((old) => [...old, { role: "assistant", content: `No session found with ID ${id}. Use /sessions to list sessions.` }]);
+      setMessages((old) => [...old, { role: "assistant", content: `No session found with ID ${id}. Use /session to list sessions.` }]);
       return;
     }
     const stored = store.getMessages(id);
     setSession(id);
+    setDraftSessionTitle("");
     setHistory([systemMessage(), ...stored.filter((m) => m.role !== "system")]);
     setMessages(stored.filter((m) => m.role !== "system"));
     setModel(found.model || model());
@@ -383,7 +433,7 @@ function App() {
       await submitConnect();
       return true;
     }
-    if (key.sequence && key.sequence.length === 1 && !key.ctrl && !key.shift && !key.meta) {
+    if (key.sequence && key.sequence.length === 1 && !key.ctrl && !key.shift) {
       const { value: newValue, cursor: newCursor } = insertAtCursor(value, cursor, key.sequence);
       setConnectFieldValue(field, newValue);
       setConnectFieldCursor(field, newCursor);
@@ -480,6 +530,209 @@ function App() {
     }
   };
 
+  // Model picker handlers
+  const openModelPicker = (refresh = false) => {
+    setModelPickerQuery("");
+    setModelPickerIndex(0);
+    setModelPickerError(null);
+    setModelPickerOpen(true);
+    if (refresh) {
+      void refreshModelPicker();
+    }
+  };
+
+  const closeModelPicker = () => {
+    if (modelPickerAbort) {
+      modelPickerAbort.abort();
+      modelPickerAbort = undefined;
+    }
+    setModelPickerOpen(false);
+    setModelPickerQuery("");
+    setModelPickerIndex(0);
+    setModelPickerError(null);
+    setModelPickerBusy(false);
+  };
+
+  const refreshModelPicker = async () => {
+    if (!client) return;
+    setModelPickerBusy(true);
+    setModelPickerError(null);
+    modelPickerAbort = new AbortController();
+    try {
+      const list = await client.listModels(modelPickerAbort.signal);
+      setModels(list);
+      setModelPickerError(null);
+    } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") return;
+      setModelPickerError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setModelPickerBusy(false);
+      modelPickerAbort = undefined;
+    }
+  };
+
+  const applyModel = async (modelId: string) => {
+    if (!isValidModelId(modelId)) {
+      setMessages((old) => [...old, { role: "assistant", content: "Invalid model ID." }]);
+      return;
+    }
+    try {
+      updateDotEnvModel(modelId);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to update .env";
+      setMessages((old) => [...old, { role: "assistant", content: `Failed to save model: ${msg}` }]);
+      showToast(`Failed to save model: ${msg}`);
+      return;
+    }
+    setModel(modelId);
+    configuredModel = modelId;
+    if (session()) {
+      store.updateModel(session()!, modelId);
+    }
+    setNotice(`Model set to ${modelId} · saved to .env`);
+    showToast(`♡ model → ${modelId} · saved to .env`);
+    closeModelPicker();
+  };
+
+  const handleModelPickerKey = (key: { name: string; ctrl: boolean; shift: boolean; sequence: string }) => {
+    if (!modelPickerOpen()) return false;
+
+    const allModels = mergeCurrentModel(models(), configuredModel || model() || "");
+    const filtered = filterModels(allModels, modelPickerQuery());
+    const count = filtered.length;
+    let index = modelPickerIndex();
+
+    if (key.name === "escape") {
+      closeModelPicker();
+      return true;
+    }
+    if (key.name === "up") {
+      setModelPickerIndex(movePickerIndex(index, -1, count));
+      return true;
+    }
+    if (key.name === "down") {
+      setModelPickerIndex(movePickerIndex(index, 1, count));
+      return true;
+    }
+    if (key.name === "pageup") {
+      const pageSize = Math.max(1, Math.floor((terminal().height - 12) / 1));
+      setModelPickerIndex(pagePickerIndex(index, pageSize, count, -1));
+      return true;
+    }
+    if (key.name === "pagedown") {
+      const pageSize = Math.max(1, Math.floor((terminal().height - 12) / 1));
+      setModelPickerIndex(pagePickerIndex(index, pageSize, count, 1));
+      return true;
+    }
+    if (key.name === "home") {
+      setModelPickerIndex(homeEndIndex(index, count, true));
+      return true;
+    }
+    if (key.name === "end") {
+      setModelPickerIndex(homeEndIndex(index, count, false));
+      return true;
+    }
+    if (key.name === "return") {
+      const selected = filtered[index];
+      if (selected) {
+        void applyModel(selected.id);
+      }
+      return true;
+    }
+    if ((key.ctrl && key.name === "r") || (key.ctrl && key.shift && key.name === "r")) {
+      void refreshModelPicker();
+      return true;
+    }
+    if (key.name === "backspace") {
+      setModelPickerQuery((q) => q.slice(0, -1));
+      setModelPickerIndex(0);
+      return true;
+    }
+    if (key.ctrl && key.name === "u") {
+      setModelPickerQuery("");
+      setModelPickerIndex(0);
+      return true;
+    }
+    if (key.sequence && key.sequence.length === 1 && !key.ctrl) {
+      setModelPickerQuery((q) => q + key.sequence);
+      setModelPickerIndex(0);
+      return true;
+    }
+    return false;
+  };
+
+  // Session rename popup handlers
+  const openRenamePopup = () => {
+    const currentTitle = session() ? store.getSession(session()!)?.title || "" : draftSessionTitle();
+    setRenameDraft(currentTitle);
+    setRenameError("");
+    setRenameOpen(true);
+  };
+
+  const closeRenamePopup = () => {
+    setRenameOpen(false);
+    setRenameDraft("");
+    setRenameError("");
+  };
+
+  const applyRename = () => {
+    const title = normalizeSessionTitle(renameDraft());
+    if (!title) {
+      setRenameError("Name cannot be empty");
+      return;
+    }
+    const sid = session();
+    if (sid) {
+      store.renameSession(sid, title);
+      setDraftSessionTitle(title);
+      setNotice(`Session renamed to "${title}"`);
+      showToast(`♡ session renamed: ${title}`);
+    } else {
+      setDraftSessionTitle(title);
+      setNotice(`Draft session named "${title}"`);
+      showToast(`♡ draft session named: ${title}`);
+    }
+    closeRenamePopup();
+  };
+
+  const handleRenameKey = (key: { name: string; ctrl: boolean; shift: boolean; sequence: string }) => {
+    if (!renameOpen()) return false;
+
+    if (key.name === "escape") {
+      closeRenamePopup();
+      return true;
+    }
+    if (key.name === "return") {
+      applyRename();
+      return true;
+    }
+    if (key.name === "backspace") {
+      setRenameDraft((d) => d.slice(0, -1));
+      setRenameError("");
+      return true;
+    }
+    if (key.ctrl && key.name === "u") {
+      setRenameDraft("");
+      setRenameError("");
+      return true;
+    }
+    if ((key.ctrl && key.name === "v") || (key.name === "insert" && key.shift)) {
+      void readClipboardText().then((text) => {
+        if (text) {
+          const { text: sanitized } = sanitizePastedText(text);
+          setRenameDraft((d) => d + sanitized);
+        }
+      });
+      return true;
+    }
+    if (key.sequence && key.sequence.length === 1 && !key.ctrl) {
+      setRenameDraft((d) => d + key.sequence);
+      setRenameError("");
+      return true;
+    }
+    return false;
+  };
+
   // Session command handlers
   const handleSessionCommand = async (text: string) => {
     const parts = text.trim().split(/\s+/);
@@ -499,6 +752,30 @@ function App() {
       setNotice(`session ${id} deleted`);
       return;
     }
+    if (sub === "rename") {
+      if (parts.length > 2) {
+        const newTitle = parts.slice(2).join(" ");
+        const normalized = normalizeSessionTitle(newTitle);
+        if (!normalized) {
+          setMessages((old) => [...old, { role: "assistant", content: "Session name cannot be empty." }]);
+          return;
+        }
+        const sid = session();
+        if (sid) {
+          store.renameSession(sid, normalized);
+          setDraftSessionTitle(normalized);
+          setNotice(`Session renamed to "${normalized}"`);
+          showToast(`♡ session renamed: ${normalized}`);
+        } else {
+          setDraftSessionTitle(normalized);
+          setNotice(`Draft session named "${normalized}"`);
+          showToast(`♡ draft session named: ${normalized}`);
+        }
+      } else {
+        openRenamePopup();
+      }
+      return;
+    }
     // Treat as session ID to resume
     resumeSession(sub);
   };
@@ -508,11 +785,11 @@ function App() {
     setSessionPickerIndex(0);
     const sessions = store.listSessions();
     if (sessions.length === 0) {
-      setMessages((old) => [...old, { role: "assistant", content: "No saved sessions yet. Use /session new to create one." }]);
+      setMessages((old) => [...old, { role: "assistant", content: "No saved sessions yet. Send a message to create your first session." }]);
       setSessionPickerOpen(false);
       return;
     }
-    const listing = sessions.map((s, i) => `${i + 1}. ${s.id}  ${s.title}  [${s.model || "no model"}]  ${new Date(s.created_at).toLocaleString()}`).join("\n");
+    const listing = sessions.map((s, i) => `${i + 1}. ${s.title || "unnamed"}  [${s.model || "no model"}]  #${s.id}  ${new Date(s.created_at).toLocaleString()}`).join("\n");
     setMessages((old) => [...old, { role: "assistant", content: `Sessions (↑/↓ to navigate, Enter to resume, Esc to cancel):\n${listing}` }]);
     setNotice("session picker open");
   };
@@ -779,32 +1056,25 @@ No file has been changed. Review this preview, then type /apply to approve or /r
     if (text === "/help") {
       setMessages((old) => [...old, {
         role: "assistant",
-        content: "Commands: /help · /cat · /pet · /feed · /expressions · /expression <id> · /models · /model <id> · /connect · /session · /session new · /session delete <id> · /workspace · /project · /capabilities · /ls [path] · /read <path> · /search <text> · /propose <path> · /apply · /reject · /command <program args> · /run · /reject-command · /cancel · /clear · /quit\n\nFile changes require explicit /apply approval. Terminal commands are restricted, previewed, and run only after explicit /run approval. Web browsing remains unavailable.",
+        content: "Commands: /help · /cat · /pet · /feed · /expressions · /expression <id> · /models · /model · /connect · /session · /session new · /session delete <id> · /session rename · /workspace · /project · /capabilities · /ls [path] · /read <path> · /search <text> · /propose <path> · /apply · /reject · /command <program args> · /run · /reject-command · /cancel · /clear · /quit\n\nFile changes require explicit /apply approval. Terminal commands are restricted, previewed, and run only after explicit /run approval. Web browsing remains unavailable.",
       }]);
       return;
     }
-    if (text === "/models") {
-      await refreshModels();
-      const modelList = models();
-      if (modelList.length === 0) {
-        setMessages((old) => [...old, { role: "assistant", content: `No models available. Check your NVIDIA API key and connection.` }]);
-        return;
-      }
-      const current = model();
-      const listing = modelList.map((m) => `${m.id === current ? "→ " : "  "}${m.id}${m.id === current ? " (current)" : ""}`).join("\n");
-      setMessages((old) => [...old, { role: "assistant", content: `Available NVIDIA models:\n${listing}\n\nUse /model <id> to switch.` }]);
+    if (text === "/models" || text === "/model") {
+      openModelPicker(text === "/models");
       return;
     }
     if (text.startsWith("/model ")) {
       const requested = text.slice(7).trim();
+      if (!isValidModelId(requested)) {
+        setMessages((old) => [...old, { role: "assistant", content: "Invalid model ID." }]);
+        return;
+      }
       const found = models().find((entry) => entry.id === requested);
       if (found) {
-        setModel(found.id);
-        store.updateModel(session(), found.id);
-        setNotice(`Model set to ${found.id}`);
-        setMessages((old) => [...old, { role: "assistant", content: `♡ Model set to ${found.id} (session only). Use /connect to persist to .env.` }]);
+        await applyModel(found.id);
       } else {
-        setMessages((old) => [...old, { role: "assistant", content: `I can't find that model in the current NVIDIA catalog. Try /models first.` }]);
+        setMessages((old) => [...old, { role: "assistant", content: `I can't find that model in the current NVIDIA catalog. Try /model to open the picker.` }]);
       }
       return;
     }
@@ -1006,8 +1276,18 @@ No file has been changed. Review this preview, then type /apply to approve or /r
       return;
     }
 
+    // Handle model picker keys
+    if (modelPickerOpen()) {
+      if (handleModelPickerKey(key)) return;
+    }
+
+    // Handle rename popup keys
+    if (renameOpen()) {
+      if (handleRenameKey(key)) return;
+    }
+
     // Global copy/paste shortcuts (work when not in popup)
-    if (!connectOpen() && !sessionPickerOpen() && !catMenuOpen()) {
+    if (!connectOpen() && !sessionPickerOpen() && !catMenuOpen() && !modelPickerOpen() && !renameOpen()) {
       // Ctrl+Shift+V or Ctrl+V or Shift+Insert - paste from clipboard
       if (((key.ctrl && key.shift && key.name === "v") || (key.ctrl && key.name === "v") || (key.name === "insert" && key.shift)) && !key.meta) {
         void readClipboardText().then((text) => {
@@ -1163,7 +1443,7 @@ No file has been changed. Review this preview, then type /apply to approve or /r
       key.sequence &&
       key.sequence.length > 0 &&
       !key.sequence.startsWith("\u001b") &&
-      ((!key.ctrl && !key.meta) || key.sequence.length > 1)
+      ((!key.ctrl) || key.sequence.length > 1)
     ) {
       // Bracketed paste can arrive as one multi-character sequence. Accept it
       // even if the terminal marks modifier flags on the event, while ignoring
@@ -1176,17 +1456,34 @@ No file has been changed. Review this preview, then type /apply to approve or /r
   });
 
   return (
-    <box flexDirection="column" backgroundColor={colors.bg} padding={1} gap={1} width="100%" height="100%">
-      <box flexDirection="row" justifyContent="space-between" backgroundColor={colors.panel} padding={1} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
+    <box flexDirection="column" backgroundColor={colors.bg} width="100%" height="100%">
+      <box flexDirection="row" justifyContent="space-between" backgroundColor={colors.panel} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
         <box flexDirection="row" gap={1} minWidth={0} flexShrink={1}>
-          <text fg={colors.pink} wrapMode="none" flexShrink={0}>✿ M I N T</text>
-          <Show when={terminal().width >= 64}>
+          <Show when={terminal().width >= 52}>
+            <ascii_font text="MINT" font="tiny" color={colors.pink} backgroundColor="transparent" selectable={false} />
+          </Show>
+          <Show when={terminal().width < 52}>
+            <text fg={colors.pink} wrapMode="none" flexShrink={0}>✿ MINT</text>
+          </Show>
+          <Show when={terminal().width >= 72}>
             <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>/ tiny coding companion</text>
           </Show>
         </box>
-        <text fg={status() === "connected" ? colors.mint : status() === "error" ? colors.red : colors.peach} wrapMode="none" flexShrink={0}>
-          {terminal().width >= 56 ? (status() === "connected" ? "● NVIDIA connected" : status() === "error" ? "● needs attention" : "◌ connecting") : "●"}
-        </text>
+        <box flexDirection="row" gap={2} minWidth={0} flexShrink={0}>
+          <Show when={terminal().width >= 60}>
+            <text fg={colors.lavender} wrapMode="none" flexShrink={0}>✧ {getSessionTitle()} ✧</text>
+          </Show>
+          <Show when={terminal().width >= 48}>
+            <text fg={status() === "connected" ? colors.mint : status() === "error" ? colors.red : colors.peach} wrapMode="none" flexShrink={0}>
+              {status() === "connected" ? "● connected" : status() === "error" ? "● error" : "◌ connecting"}
+            </text>
+          </Show>
+          <Show when={terminal().width < 48}>
+            <text fg={status() === "connected" ? colors.mint : status() === "error" ? colors.red : colors.peach} wrapMode="none" flexShrink={0}>
+              {status() === "connected" ? "●" : status() === "error" ? "✗" : "◌"}
+            </text>
+          </Show>
+        </box>
       </box>
 
       <box flexDirection="row" gap={1} flexGrow={1} minWidth={0} minHeight={0} width="100%" overflow="hidden">
@@ -1254,27 +1551,34 @@ No file has been changed. Review this preview, then type /apply to approve or /r
               </Show>
             </box>
           </Show>
-          <text fg={colors.muted}>────────────────</text>
-          <text fg={colors.mint}>MODEL</text>
+        </scrollbox>
+        <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0}>
+          <Show when={session()}>
+            <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>────────────────</text>
+            <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none" truncate={true}>SESSION</text>
+            <text fg={colors.text} width="100%" minWidth={0} wrapMode="none" truncate={true}>{getSessionTitle()}</text>
+            <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>#{session()}</text>
+          </Show>
+          <Show when={!session()}>
+            <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>────────────────</text>
+            <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none" truncate={true}>SESSION</text>
+            <text fg={colors.text} width="100%" minWidth={0} wrapMode="none" truncate={true}>{draftSessionTitle() || "new session"}</text>
+            <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>draft · saved on first message</text>
+          </Show>
+          <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>────────────────</text>
+          <text fg={colors.mint} width="100%" minWidth={0} wrapMode="none" truncate={true}>MODEL</text>
           <text fg={colors.text} width="100%" minWidth={0} wrapMode="none" truncate={true}>{model() || "not selected"}</text>
-          <text fg={colors.muted}>────────────────</text>
-          <text fg={colors.peach}>STATUS</text>
+          <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>────────────────</text>
+          <text fg={colors.peach} width="100%" minWidth={0} wrapMode="none" truncate={true}>STATUS</text>
           <text fg={colors.text} width="100%" minWidth={0} wrapMode="none" truncate={true}>{notice()}</text>
-          <text fg={colors.muted}>────────────────</text>
-          <text fg={colors.muted}>/cat   interact with cat</text>
-          <text fg={colors.muted}>/pet   pet the cat</text>
-          <text fg={colors.muted}>/feed  give a treat</text>
-          <text fg={colors.muted}>/help  commands</text>
-          <text fg={colors.muted}>/ls    list files</text>
-          <text fg={colors.muted}>/read  read a file</text>
-          <text fg={colors.muted}>/search find text</text>
-          <text fg={colors.muted}>/propose edit file</text>
-          <text fg={colors.muted}>/capabilities tools</text>
-          <text fg={colors.muted}>/apply approve diff</text>
-          <text fg={colors.muted}>/quit  exit</text>
-          </scrollbox>
+          <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>────────────────</text>
+          <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>/model  choose model</text>
+          <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>/cat   interact</text>
+          <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>/ls    list files</text>
+          <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>/help  all commands</text>
         </box>
-        </Show>
+      </box>
+      </Show>
 
         <box flexGrow={1} minWidth={0} minHeight={0} width="100%" flexDirection="column" backgroundColor={colors.panel} padding={1} gap={1} overflow="hidden">
           <box flexDirection="row" justifyContent="space-between" width="100%" minWidth={0} flexShrink={0} overflow="hidden">
@@ -1520,6 +1824,143 @@ No file has been changed. Review this preview, then type /apply to approve or /r
           <Show when={!connectBusy()}>
             <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>Tab next · Shift+Tab prev · Enter connect · Esc cancel · Ctrl+Shift+V paste</text>
           </Show>
+        </box>
+      </Show>
+
+      {/* Model picker */}
+      <Show when={modelPickerOpen()}>
+        <box
+          position="absolute"
+          top={Math.max(2, Math.floor(terminal().height / 2) - Math.min(15, Math.floor((terminal().height - 8) / 2)))}
+          left={Math.max(2, Math.floor((terminal().width - Math.min(80, terminal().width - 4)) / 2))}
+          width={Math.min(80, terminal().width - 4)}
+          minWidth={40}
+          backgroundColor={colors.panel}
+          borderStyle="rounded"
+          borderColor={colors.lavender}
+          padding={1}
+          gap={1}
+          flexShrink={0}
+        >
+          <box flexDirection="row" gap={1} width="100%" minWidth={0} overflow="hidden">
+            <text fg={colors.lavender} wrapMode="none" flexShrink={1} truncate={true}>
+              {modelPickerBusy() ? "⟳" : "✧"} MODELS · {filterModels(mergeCurrentModel(models(), configuredModel || model() || ""), modelPickerQuery()).length} available
+            </text>
+            <Show when={configuredModel || model()}>
+              <text fg={colors.muted} wrapMode="none" flexShrink={0}>current: {configuredModel || model()}</text>
+            </Show>
+          </box>
+          <Show when={modelPickerError()}>
+            <text fg={colors.red} wrapMode="none" width="100%" minWidth={0} truncate={true}>Error: {modelPickerError()}</text>
+          </Show>
+          <box flexDirection="row" gap={1} width="100%" minWidth={0}>
+            <text fg={colors.muted} wrapMode="none" width={7}>search</text>
+            <box
+              flexGrow={1}
+              minWidth={0}
+              backgroundColor={colors.bg}
+              borderStyle="single"
+              borderColor={colors.lavender}
+              paddingLeft={1}
+              paddingRight={1}
+              overflow="hidden"
+            >
+              <text
+                fg={colors.text}
+                wrapMode="none"
+                width="100%"
+                minWidth={0}
+                truncate={true}
+              >
+                {modelPickerQuery()}▌
+              </text>
+            </box>
+          </box>
+          <Show when={filterModels(mergeCurrentModel(models(), configuredModel || model() || ""), modelPickerQuery()).length > 0}>
+            <scrollbox flexGrow={1} minHeight={0} width="100%" minWidth={0} contentOptions={{ flexDirection: "column", gap: 0 }}>
+              <For each={visibleWindow(modelPickerIndex(), Math.max(1, terminal().height - 14), filterModels(mergeCurrentModel(models(), configuredModel || model() || ""), modelPickerQuery()).length)}>
+                {(absoluteIndex) => {
+                  const allModels = filterModels(mergeCurrentModel(models(), configuredModel || model() || ""), modelPickerQuery());
+                  const m = allModels[absoluteIndex];
+                  if (!m) return <text> </text>;
+                  return (
+                    <box
+                      flexDirection="row"
+                      width="100%"
+                      minWidth={0}
+                      height={1}
+                      minHeight={1}
+                      overflow="hidden"
+                      backgroundColor={absoluteIndex === modelPickerIndex() ? colors.lavender : colors.panel}
+                    >
+                      <text
+                        fg={absoluteIndex === modelPickerIndex() ? colors.bg : m.id === (configuredModel || model()) ? colors.mint : colors.text}
+                        wrapMode="none"
+                        width="100%"
+                        minWidth={0}
+                        truncate={true}
+                      >
+                        {(absoluteIndex === modelPickerIndex() ? "❯ " : "  ") + m.id + (m.id === (configuredModel || model()) ? " ●" : "") + (m.owned_by ? " · " + m.owned_by : "")}
+                      </text>
+                    </box>
+                  );
+                }}
+              </For>
+            </scrollbox>
+          </Show>
+          <Show when={filterModels(mergeCurrentModel(models(), configuredModel || model() || ""), modelPickerQuery()).length === 0 && !modelPickerBusy()}>
+            <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>No models match "{modelPickerQuery()}". Press Ctrl+R to refresh catalog.</text>
+          </Show>
+          <Show when={modelPickerBusy()}>
+            <text fg={colors.peach} wrapMode="none" width="100%" minWidth={0} truncate={true}>⟳ fetching models…</text>
+          </Show>
+          <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>↑/↓ move · PgUp/PgDn · Home/End · type filter · Enter use · Esc close · Ctrl+R refresh</text>
+        </box>
+      </Show>
+
+      {/* Rename popup */}
+      <Show when={renameOpen()}>
+        <box
+          position="absolute"
+          top={Math.max(2, Math.floor(terminal().height / 2) - 4)}
+          left={Math.max(2, Math.floor((terminal().width - Math.min(60, terminal().width - 4)) / 2))}
+          width={Math.min(60, terminal().width - 4)}
+          minWidth={30}
+          backgroundColor={colors.panel}
+          borderStyle="rounded"
+          borderColor={colors.pink}
+          padding={1}
+          gap={1}
+          flexShrink={0}
+        >
+          <text fg={colors.pink} wrapMode="none" width="100%">✎ RENAME SESSION</text>
+          <box flexDirection="row" gap={1} width="100%" minWidth={0}>
+            <text fg={colors.muted} wrapMode="none" width={5}>name</text>
+            <box
+              flexGrow={1}
+              minWidth={0}
+              backgroundColor={colors.bg}
+              borderStyle="single"
+              borderColor={colors.pink}
+              paddingLeft={1}
+              paddingRight={1}
+              overflow="hidden"
+            >
+              <text
+                fg={colors.text}
+                wrapMode="none"
+                width="100%"
+                minWidth={0}
+                truncate={true}
+              >
+                {renameDraft()}▌
+              </text>
+            </box>
+          </box>
+          <Show when={renameError()}>
+            <text fg={colors.red} wrapMode="none" width="100%" minWidth={0} truncate={true}>{renameError()}</text>
+          </Show>
+          <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>Enter save · Esc cancel · Ctrl+Shift+V paste</text>
         </box>
       </Show>
     </box>

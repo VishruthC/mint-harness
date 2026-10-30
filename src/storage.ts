@@ -82,8 +82,21 @@ export class SessionStore {
   addMessage(sessionId: string, message: StoredMessage) {
     const now = new Date().toISOString();
     this.db.query("INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)").run(sessionId, message.role, message.content, now);
-    this.db.query("UPDATE sessions SET updated_at = ?, title = CASE WHEN title = 'New session' AND ? = 'user' THEN substr(?, 1, 64) ELSE title END WHERE id = ?")
-      .run(now, message.role, message.content, sessionId);
+    this.db.query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(now, sessionId);
+  }
+
+  createSessionWithMessage(model: string, message: StoredMessage, title?: string): Session {
+    const now = new Date().toISOString();
+    const id = crypto.randomUUID().slice(0, 8);
+    const sessionTitle = title && title.trim() ? title.trim().slice(0, 64) : message.content.trim().slice(0, 64);
+    this.db.query(`INSERT INTO sessions (id, title, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`).run(id, sessionTitle || "new session", model, now, now);
+    this.db.query("INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)").run(id, message.role, message.content, now);
+    return this.getSession(id)!;
+  }
+
+  renameSession(sessionId: string, title: string) {
+    const now = new Date().toISOString();
+    this.db.query("UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?").run(title.trim().slice(0, 64), now, sessionId);
   }
 
   getMessages(sessionId: string): StoredMessage[] {

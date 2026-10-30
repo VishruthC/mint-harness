@@ -75,29 +75,15 @@ const MINT_KEYS = [
   "MINT_MAX_TOOL_CALLS_PER_TURN",
 ] as const;
 
-export function writeDotEnv(config: MintConfig, path = ".env"): void {
+function writeDotEnvAtomic(
+  path: string,
+  update: (lines: string[]) => string[],
+): void {
   let existingLines: string[] = [];
   if (existsSync(path)) {
     existingLines = readFileSync(path, "utf8").split(/\r?\n/);
   }
-
-  const otherLines = existingLines.filter((line) => {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) return true;
-    const keyMatch = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
-    return keyMatch && !MINT_KEYS.includes(keyMatch[1] as typeof MINT_KEYS[number]);
-  });
-
-  const newLines = [
-    `NVIDIA_API_KEY="${config.apiKey.replace(/"/g, '\\"')}"`,
-    `NVIDIA_BASE_URL="${config.baseUrl.replace(/"/g, '\\"')}"`,
-    config.preferredModel ? `NVIDIA_MODEL="${config.preferredModel.replace(/"/g, '\\"')}"` : "",
-    `MINT_MAX_TOOL_ROUNDS=${config.maxToolRounds}`,
-    `MINT_MAX_TOOL_CALLS_PER_TURN=${config.maxToolCallsPerTurn}`,
-  ].filter(Boolean);
-
-  const output = [...otherLines, ...newLines].filter(Boolean).join("\n") + "\n";
-
+  const output = update(existingLines).filter(Boolean).join("\n") + "\n";
   const tmp = `${path}.tmp.${crypto.randomUUID()}`;
   writeFileSync(tmp, output, "utf8");
   try {
@@ -111,4 +97,40 @@ export function writeDotEnv(config: MintConfig, path = ".env"): void {
   } catch {
     // Some platforms don't support POSIX file modes
   }
+}
+
+export function writeDotEnv(config: MintConfig, path = ".env"): void {
+  writeDotEnvAtomic(path, (existingLines) => {
+    const otherLines = existingLines.filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) return true;
+      const keyMatch = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+      return keyMatch && !MINT_KEYS.includes(keyMatch[1] as typeof MINT_KEYS[number]);
+    });
+
+    const newLines = [
+      `NVIDIA_API_KEY="${config.apiKey.replace(/"/g, '\\"')}"`,
+      `NVIDIA_BASE_URL="${config.baseUrl.replace(/"/g, '\\"')}"`,
+      config.preferredModel ? `NVIDIA_MODEL="${config.preferredModel.replace(/"/g, '\\"')}"` : "",
+      `MINT_MAX_TOOL_ROUNDS=${config.maxToolRounds}`,
+      `MINT_MAX_TOOL_CALLS_PER_TURN=${config.maxToolCallsPerTurn}`,
+    ].filter(Boolean);
+
+    return [...otherLines, ...newLines];
+  });
+}
+
+export function updateDotEnvModel(model: string, path = ".env"): void {
+  if (!model || model.includes("\n") || model.includes("\r")) {
+    throw new Error("Invalid model ID");
+  }
+  writeDotEnvAtomic(path, (existingLines) => {
+    const otherLines = existingLines.filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) return true;
+      const keyMatch = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+      return keyMatch && keyMatch[1] !== "NVIDIA_MODEL";
+    });
+    return [...otherLines, `NVIDIA_MODEL="${model.replace(/"/g, '\\"')}"`];
+  });
 }
