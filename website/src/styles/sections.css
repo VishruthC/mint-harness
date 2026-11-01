@@ -13,6 +13,7 @@
   color: var(--terminal-text);
   box-shadow: 14px 14px 0 rgba(26, 24, 34, 0.1);
   font-family: ui-monospace, "Cascadia Mono", "Consolas", "Menlo", "Monaco", "Liberation Mono", monospace;
+  font-weight: 700;
 }
 
 .tui-top {
