@@ -19,23 +19,42 @@ notepad .env
 bun run dev
 ```
 
-In `.env`, set `NVIDIA_API_KEY` to your NVIDIA API key. Optionally set `NVIDIA_MODEL` to a model ID available to your account. `MINT_MAX_TOOL_ROUNDS` and `MINT_MAX_TOOL_CALLS_PER_TURN` configure the per-user-turn agent limits (defaults: `12` rounds and `24` calls); both must be positive integers. Do not share or commit `.env`.
+In `.env`, set `NVIDIA_API_KEY` to your NVIDIA API key. Optionally set `NVIDIA_MODEL` to a model ID available to your account. `MINT_MAX_TOOL_ROUNDS` and `MINT_MAX_TOOL_CALLS_PER_TURN` configure the per-user-turn agent limits (defaults: `12` rounds and `24` calls); both must be positive integers. **Changes require a restart of MINT.** Do not share or commit `.env`.
 
 MINT uses `https://integrate.api.nvidia.com/v1` by default. Set `NVIDIA_MODEL` to a model ID you can access, or leave it blank and choose from the models returned by the API.
 
 ## Current commands
 
 - `/help` — show available commands
-- `/models` — refresh and list NVIDIA models
-- `/model <id>` — select a model (session only)
+- `/models` — refresh and list NVIDIA models (or open model picker)
+- `/model` — open interactive model picker
+- `/model <id>` — select a model directly (persists to `.env`)
 - `/connect` — configure NVIDIA API credentials (opens secure popup)
 - `/session` — list or resume sessions (interactive picker)
 - `/session new` — start a fresh session
 - `/session delete <id>` — delete a session
+- `/session rename` — rename active session (opens popup)
+- `/session rename <name>` — rename active session directly
+- `/limits` — show current agent limits (rounds/calls) and config keys
 - `/cancel` — cancel an in-progress response
 - `/clear` — start a fresh session (old sessions remain saved)
 - `/quit` — exit MINT
 - `Shift+Enter` — insert a newline; `Enter` sends
+
+### Mouse support
+
+MINT now supports full mouse interaction across all menus:
+
+- **All popups** (`/connect`, `/model`, `/models`, `/session`, `/session rename`): Click outside to close, click buttons to act, click list rows to select
+- **Model picker**: Click a model to select and persist it; wheel scrolls the list; Refresh/Clear/Close buttons
+- **Session picker**: Click a session to resume; wheel scrolls; New Session/Close buttons
+- **Cat menu** (modal): Click cat card, press `F2`, or type `/cat` to open; click menu items to run actions; click expressions to equip
+- **Command palette** (`/`): Hover highlights; click to execute or prefill; wheel moves selection
+- **Sidebar**: Click session name to rename, model name to open picker, status to open `/connect`
+- **Toast notifications**: Click to dismiss
+- **Chat area**: Wheel scrolls; drag-select auto-copies to clipboard
+
+All mouse actions have keyboard equivalents (↑/↓, Enter, Esc, PgUp/PgDn, Home/End, Tab).
 
 ### Clipboard shortcuts
 
@@ -49,9 +68,12 @@ MINT uses `https://integrate.api.nvidia.com/v1` by default. Set `NVIDIA_MODEL` t
 `/connect` opens a centered in-TUI popup for API key entry:
 
 - API key input is **always masked** (shows `•` characters)
+- Click any field to focus it (cursor moves to end)
 - Paste your key with `Ctrl+Shift+V` — the raw key never appears in chat history, logs, or SQLite
 - Tab/Shift+Tab to navigate between API Key, Base URL, and Model fields
+- Backspace/Delete/Left/Right/Home/End work correctly in all fields
 - Enter to test connection and save to `.env`; Esc to cancel
+- Click Connect/Cancel buttons or click outside to close
 - Connection is validated against NVIDIA before writing
 
 No local-model or alternate-cloud-provider setup is included.
@@ -62,12 +84,14 @@ Conversation history is stored in SQLite at `~/.mint/mint.sqlite` by default. Se
 
 ### Session management
 
-- `/session` — opens interactive picker (↑/↓ to navigate, Enter to resume, Esc to cancel, or type 1-9)
+- `/session` — opens interactive picker (↑/↓ to navigate, PgUp/PgDn, Home/End, Enter to resume, Esc to cancel, or type 1-9)
 - `/session <id>` — resume a specific session directly
 - `/session new` — create a fresh session
 - `/session delete <id>` — remove a saved session
+- `/session rename` — open rename popup for active session
+- `/session rename <name>` — rename active session directly (64 char max)
 
-Each session stores its own model selection, which is restored on resume.
+Each session stores its own model selection, which is restored on resume. Sessions are created lazily on the first user message.
 
 ## Security notes
 
@@ -141,7 +165,7 @@ MINT_WORKSPACE="$HOME/Projects/my-app" bun run dev
 
 MINT now derives its system instructions from the same capability registry that controls model-callable tools. Use `/capabilities` to inspect what this running instance actually exposes. The model can call the registered workspace tools during a turn, receive their results, and then answer. Unknown tools are rejected. File changes remain proposals until the user explicitly approves them with `/apply`.
 
-The NVIDIA model/API must support OpenAI-compatible streamed function/tool calls for automatic tool use to work. If the selected model or endpoint rejects the `tools` field, MINT reports the API error rather than pretending the tool ran. The agent loop defaults to 12 tool rounds and 24 total tool calls per user turn, configurable with `MINT_MAX_TOOL_ROUNDS` and `MINT_MAX_TOOL_CALLS_PER_TURN`. Counters reset for each new user message. Stable repeated calls are detected only when both the arguments and returned result remain unchanged; changed results are allowed through. Internet browsing, unrestricted local-file access, and external integrations are not implemented.
+The NVIDIA model/API must support OpenAI-compatible streamed function/tool calls for automatic tool use to work. If the selected model or endpoint rejects the `tools` field, MINT reports the API error rather than pretending the tool ran. The agent loop defaults to 12 tool rounds and 24 total tool calls per user turn, configurable with `MINT_MAX_TOOL_ROUNDS` and `MINT_MAX_TOOL_CALLS_PER_TURN` (restart MINT after changing). Counters reset for each new user message. Stable repeated calls are detected only when both the arguments and returned result remain unchanged; changed results are allowed through. Internet browsing, unrestricted local-file access, and external integrations are not implemented.
 
 
 ## Project understanding and patch-based edits
@@ -164,13 +188,19 @@ bun run check:windows
 The PowerShell check script runs TypeScript type-checking first and stops if it fails, then runs the Bun test suite.
 
 
-## Interactive ASCII cat
+## Interactive cat companion
 
-MINT has a classic, plain-ASCII sitting cat in the workspace sidebar. Its face changes with the selected expression and current mood; the mascot uses only standard ASCII characters for consistent rendering across terminal fonts. Click the cat (when terminal mouse reporting is supported), press `F2`, or type `/cat` to open its menu. Use Up/Down and Enter to choose an action; Escape closes the menu. The menu supports petting, feeding a virtual treat, choosing an unlocked expression, and toggling idle animations.
+MINT features a fully animated, anti-aliased cat portrait rendered as a real image — not ASCII art. The portrait is drawn in code at 384×384 with 2× supersampling for crisp edges, then displayed through OpenTUI's `ImageRenderable` using the best available terminal graphics protocol:
+
+- **Kitty graphics** — full-color RGBA with alpha, when the terminal supports it (Kitty, WezTerm, Ghostty, etc.)
+- **Sixel** — full-color image on Sixel-capable terminals
+- **Unicode quadrant blocks** — truecolor sub-pixel fallback everywhere else (works in any modern terminal)
+
+The same character appears in the workspace sidebar and the `/cat` modal. Six expressions (idle, happy, love, zoomies, wizard, chaos) plus mood overlays (thinking, error, sleepy, curious) change the cat's face, posture, and effects. Idle animations include blinking, tail sway, breathing, ear twitches, floating hearts, sparkles, and Z's — all toggleable.
 
 - `/pet` — pet MINT and increment the persistent pet counter.
 - `/feed` — give MINT a virtual treat.
 - `/expressions` — list expressions and unlock requirements.
 - `/expression <id>` — equip an unlocked expression (`idle`, `happy`, `love`, `zoomies`, `wizard`, or `chaos`).
 
-Heart eyes unlock after 3 pets; zoomies after 3 treats; the tiny wizard after 8 pets and 5 treats; and chaos gremlin after 15 pets and 10 treats. Pet/treat counts, unlocked expressions, the selected expression, and the animation preference are stored in MINT's existing SQLite database at `~/.mint/mint.sqlite` (or under `MINT_DATA_DIR`). The cat reacts to thinking, successful completion, errors, and approved command results. All rewards are cosmetic and local; there are no purchases or network calls for cat interactions.
+Heart eyes unlock after 3 pets; zoomies after 3 treats; the tiny wizard after 8 pets and 5 treats; and chaos gremlin after 15 pets and 10 treats. Pet/treat counts, unlocked expressions, the selected expression, and the animation preference are stored in MINT's SQLite database at `~/.mint/mint.sqlite` (or under `MINT_DATA_DIR`). The cat reacts to thinking, successful completion, errors, and approved command results. All rewards are cosmetic and local; there are no purchases or network calls for cat interactions. No external image assets or API keys are required — the portrait is generated entirely in memory.

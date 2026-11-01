@@ -64,8 +64,13 @@ export class RepeatedCallGuard {
 }
 
 export function formatLimitMessage(limit: LimitReached, budget: AgentTurnBudget, incomplete = "The requested task is not yet complete."): string {
+  const envHint = " To change this limit, set MINT_MAX_TOOL_CALLS_PER_TURN / MINT_MAX_TOOL_ROUNDS in .env and restart MINT.";
   if (limit === "calls") {
-    return `Tool-call limit reached: ${budget.limits.maxToolCallsPerTurn} calls per user turn (${budget.callsUsed}/${budget.limits.maxToolCallsPerTurn} used across ${budget.roundsUsed} rounds). ${incomplete} Ask me to continue to start a new turn.`;
+    return `Tool-call limit reached: ${budget.limits.maxToolCallsPerTurn} calls per user turn (${budget.callsUsed}/${budget.limits.maxToolCallsPerTurn} used across ${budget.roundsUsed} rounds). ${incomplete} Ask me to continue to start a new turn.${envHint}`;
   }
-  return `Tool-round limit reached: ${budget.limits.maxToolRounds} rounds per user turn (${budget.roundsUsed}/${budget.limits.maxToolRounds} rounds; ${budget.callsUsed}/${budget.limits.maxToolCallsPerTurn} calls used). ${incomplete} Ask me to continue to start a new turn.`;
+  return `Tool-round limit reached: ${budget.limits.maxToolRounds} rounds per user turn (${budget.roundsUsed}/${budget.limits.maxToolRounds} rounds; ${budget.callsUsed}/${budget.limits.maxToolCallsPerTurn} calls used). ${incomplete} Ask me to continue to start a new turn.${envHint}`;
+}
+
+export function formatAgentLimits(limits: AgentLoopLimits): string {
+  return `Agent limits: ${limits.maxToolRounds} rounds / ${limits.maxToolCallsPerTurn} calls per user turn. Configurable via MINT_MAX_TOOL_ROUNDS and MINT_MAX_TOOL_CALLS_PER_TURN in .env (positive integers; restart MINT after changing).`;
 }

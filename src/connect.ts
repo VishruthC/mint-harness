@@ -28,6 +28,24 @@ export function insertAtCursor(
   return { value: newValue, cursor: clamped + insert.length };
 }
 
+export function deleteBeforeCursor(
+  value: string,
+  cursor: number,
+): { value: string; cursor: number } {
+  const clamped = Math.max(0, Math.min(cursor, value.length));
+  if (clamped === 0) return { value, cursor: 0 };
+  return { value: value.slice(0, clamped - 1) + value.slice(clamped), cursor: clamped - 1 };
+}
+
+export function deleteAtCursor(
+  value: string,
+  cursor: number,
+): { value: string; cursor: number } {
+  const clamped = Math.max(0, Math.min(cursor, value.length));
+  if (clamped >= value.length) return { value, cursor: clamped };
+  return { value: value.slice(0, clamped) + value.slice(clamped + 1), cursor: clamped };
+}
+
 export function normalizeApiKey(raw: string): string {
   return raw.trim().replace(/\s+/g, "");
 }

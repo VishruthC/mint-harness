@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AgentTurnBudget, DEFAULT_AGENT_LOOP_LIMITS, formatLimitMessage, RepeatedCallGuard } from "../src/agent-loop";
+import { AgentTurnBudget, DEFAULT_AGENT_LOOP_LIMITS, formatAgentLimits, formatLimitMessage, RepeatedCallGuard } from "../src/agent-loop";
 
 describe("agent turn budget", () => {
   test("defaults to twelve rounds and twenty-four calls", () => {
@@ -34,6 +34,37 @@ describe("agent turn budget", () => {
     expect(budget.startRound()).toBe(false);
     expect(budget.getLimitReached()).toBe("rounds");
     expect(formatLimitMessage("rounds", budget)).toContain("2/2 rounds");
+  });
+});
+
+describe("formatLimitMessage includes env hint", () => {
+  test("calls limit message mentions MINT_MAX_TOOL_CALLS_PER_TURN", () => {
+    const budget = new AgentTurnBudget({ maxToolRounds: 12, maxToolCallsPerTurn: 3 });
+    budget.startRound();
+    budget.recordCalls(3);
+    const msg = formatLimitMessage("calls", budget);
+    expect(msg).toContain("MINT_MAX_TOOL_CALLS_PER_TURN");
+    expect(msg).toContain("restart MINT");
+  });
+
+  test("rounds limit message mentions MINT_MAX_TOOL_ROUNDS", () => {
+    const budget = new AgentTurnBudget({ maxToolRounds: 2, maxToolCallsPerTurn: 10 });
+    budget.startRound();
+    budget.startRound();
+    const msg = formatLimitMessage("rounds", budget);
+    expect(msg).toContain("MINT_MAX_TOOL_ROUNDS");
+    expect(msg).toContain("restart MINT");
+  });
+});
+
+describe("formatAgentLimits", () => {
+  test("returns current limits and config keys", () => {
+    const out = formatAgentLimits({ maxToolRounds: 34, maxToolCallsPerTurn: 64 });
+    expect(out).toContain("34 rounds");
+    expect(out).toContain("64 calls");
+    expect(out).toContain("MINT_MAX_TOOL_ROUNDS");
+    expect(out).toContain("MINT_MAX_TOOL_CALLS_PER_TURN");
+    expect(out).toContain("restart MINT");
   });
 });
 

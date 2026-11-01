@@ -1,18 +1,22 @@
 import { render, useKeyboard, useRenderer, useTerminalDimensions, usePaste, useSelectionHandler } from "@opentui/solid";
-import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createMemo, createSignal, createEffect, onCleanup, onMount, JSX } from "solid-js";
 import { loadConfig, writeDotEnv, updateDotEnvModel, type MintConfig } from "./config";
-import { AgentTurnBudget, formatLimitMessage, RepeatedCallGuard } from "./agent-loop";
+import { AgentTurnBudget, formatAgentLimits, formatLimitMessage, RepeatedCallGuard } from "./agent-loop";
 import { NvidiaClient, type ChatMessage, type NvidiaModel, type ToolCall } from "./nvidia";
 import { buildSystemPrompt, executeModelTool, getCapabilities, getModelTools } from "./agent-tools";
-import { SessionStore, type StoredMessage } from "./storage";
+import { SessionStore, type StoredMessage, type Session } from "./storage";
 import { WorkspaceTools } from "./tools";
 import { ApprovedTerminal } from "./terminal";
-import { CAT_EXPRESSIONS, catProfileSummary, catSprite, feedCat, petCat, selectCatExpression, type CatMood } from "./cat";
+import { CAT_EXPRESSIONS, catProfileSummary, feedCat, petCat, selectCatExpression, type CatMood, type CatExpressionId } from "./cat";
+import { CatPortrait, RunCatIndicator } from "./cat-portrait";
+import { renderCatFrame, CAT_ART_SIZE, CAT_ART_FRAMES, type CatExpression } from "./cat-art";
 import type { CatProfile } from "./storage";
 import {
   MAX_PASTE_CHARS,
   sanitizePastedText,
   insertAtCursor,
+  deleteBeforeCursor,
+  deleteAtCursor,
   normalizeApiKey,
   validateConnectDraft,
   maskSecret,
@@ -51,6 +55,260 @@ const colors = {
 
 type ViewMessage = { role: "user" | "assistant" | "system"; content: string };
 
+type MessageSegment =
+  | { type: "text"; content: string }
+  | { type: "reasoning"; content: string }
+  | { type: "code"; language: string; content: string }
+  | { type: "diff"; language: string; content: string; hunks: DiffHunk[] };
+
+interface DiffHunk {
+  oldStart: number;
+  oldLines: number;
+  newStart: number;
+  newLines: number;
+  lines: DiffLine[];
+}
+
+interface DiffLine {
+  type: "context" | "add" | "remove";
+  content: string;
+  oldLineNum?: number;
+  newLineNum?: number;
+}
+
+// Parse assistant message into structured segments for rich rendering
+function parseMessageSegments(content: string): MessageSegment[] {
+  const segments: MessageSegment[] = [];
+  let remaining = content;
+
+  // Regex to match fenced code blocks with optional diff language
+  const codeBlockRegex = /^```(\w+)?\n([\s\S]*?)\n```/gm;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = codeBlockRegex.exec(remaining)) !== null) {
+    const [fullMatch, language = "", codeContent] = match;
+    const matchStart = match.index;
+    const matchEnd = match.index + fullMatch.length;
+
+    // Text before this code block
+    if (matchStart > lastIndex) {
+      const textContent = remaining.slice(lastIndex, matchStart).trimEnd();
+      if (textContent) {
+        // Check for reasoning blocks in text
+        const reasoningParts = splitReasoning(textContent);
+        segments.push(...reasoningParts);
+      }
+    }
+
+    // Check if this is a diff block
+    if (language.toLowerCase() === "diff") {
+      const diffSegments = parseDiffBlock(codeContent);
+      segments.push(...diffSegments);
+    } else {
+      segments.push({ type: "code", language, content: codeContent });
+    }
+
+    lastIndex = matchEnd;
+  }
+
+  // Remaining text after last code block
+  if (lastIndex < remaining.length) {
+    const textContent = remaining.slice(lastIndex).trimEnd();
+    if (textContent) {
+      const reasoningParts = splitReasoning(textContent);
+      segments.push(...reasoningParts);
+    }
+  }
+
+  // If no segments found, treat entire content as text
+  if (segments.length === 0) {
+    const reasoningParts = splitReasoning(content);
+    segments.push(...reasoningParts);
+  }
+
+  return segments;
+}
+
+// Split text into reasoning and regular text segments
+function splitReasoning(text: string): MessageSegment[] {
+  const segments: MessageSegment[] = [];
+  const reasoningRegex = /<thinking>([\s\S]*?)<\/thinking>/gi;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = reasoningRegex.exec(text)) !== null) {
+    const [fullMatch, reasoningContent] = match;
+    const matchStart = match.index;
+    const matchEnd = match.index + fullMatch.length;
+
+    if (matchStart > lastIndex) {
+      const textContent = text.slice(lastIndex, matchStart);
+      if (textContent.trim()) {
+        segments.push({ type: "text", content: textContent });
+      }
+    }
+
+    if (reasoningContent.trim()) {
+      segments.push({ type: "reasoning", content: reasoningContent.trim() });
+    }
+
+    lastIndex = matchEnd;
+  }
+
+  if (lastIndex < text.length) {
+    const textContent = text.slice(lastIndex);
+    if (textContent.trim()) {
+      segments.push({ type: "text", content: textContent });
+    }
+  }
+
+  if (segments.length === 0 && text.trim()) {
+    segments.push({ type: "text", content: text });
+  }
+
+  return segments;
+}
+
+// Parse a diff block into structured diff segments
+function parseDiffBlock(diffContent: string): MessageSegment[] {
+  const segments: MessageSegment[] = [];
+  // Match unified diff format: @@ -oldStart,oldLines +newStart,newLines @@
+  const hunkRegex = /^@@\s+-(\d+),?(\d*)\s+\+(\d+),?(\d*)\s+@@/gm;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  const hunks: DiffHunk[] = [];
+
+  while ((match = hunkRegex.exec(diffContent)) !== null) {
+    const oldStart = parseInt(match[1], 10);
+    const oldLines = match[2] ? parseInt(match[2], 10) : 1;
+    const newStart = parseInt(match[3], 10);
+    const newLines = match[4] ? parseInt(match[4], 10) : 1;
+    const hunkStart = match.index;
+    const hunkEnd = hunkRegex.lastIndex;
+
+    // Extract lines for this hunk (until next hunk or end)
+    const nextMatch = hunkRegex.exec(diffContent);
+    const hunkContentEnd = nextMatch ? nextMatch.index : diffContent.length;
+    if (nextMatch) hunkRegex.lastIndex = nextMatch.index; // reset for next iteration
+
+    const hunkLinesContent = diffContent.slice(hunkEnd, hunkContentEnd).trimEnd();
+    const lines = parseDiffLines(hunkLinesContent, oldStart, newStart);
+
+    hunks.push({ oldStart, oldLines, newStart, newLines, lines });
+  }
+
+  if (hunks.length > 0) {
+    segments.push({ type: "diff", language: "diff", content: diffContent, hunks });
+  } else {
+    // Fallback: treat as regular code block
+    segments.push({ type: "code", language: "diff", content: diffContent });
+  }
+
+  return segments;
+}
+
+// Parse individual diff lines within a hunk
+function parseDiffLines(content: string, oldStart: number, newStart: number): DiffLine[] {
+  const lines: DiffLine[] = [];
+  let oldLineNum = oldStart;
+  let newLineNum = newStart;
+
+  for (const line of content.split("\n")) {
+    if (line.startsWith("+")) {
+      lines.push({ type: "add", content: line.slice(1), newLineNum: newLineNum++ });
+    } else if (line.startsWith("-")) {
+      lines.push({ type: "remove", content: line.slice(1), oldLineNum: oldLineNum++ });
+    } else {
+      lines.push({ type: "context", content: line.slice(1), oldLineNum: oldLineNum++, newLineNum: newLineNum++ });
+    }
+  }
+
+  return lines;
+}
+
+// Render a single message segment into JSX
+function renderSegment(segment: MessageSegment, colors: typeof colors): JSX.Element {
+  switch (segment.type) {
+    case "text":
+      return (
+        <text fg={colors.text} wrapMode="word" width="100%" minWidth={0}>
+          {segment.content}
+        </text>
+      );
+    case "reasoning":
+      return (
+        <box flexDirection="column" gap={0} width="100%" minWidth={0} backgroundColor={colors.bg} padding={1} borderStyle="single" borderColor={colors.muted}>
+          <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>◆ reasoning</text>
+          <text fg={colors.muted} wrapMode="word" width="100%" minWidth={0} opacity={0.8}>
+            {segment.content}
+          </text>
+        </box>
+      );
+    case "code":
+      return (
+        <box flexDirection="column" gap={0} width="100%" minWidth={0} backgroundColor={colors.bg} padding={1} borderStyle="single" borderColor={colors.muted}>
+          <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>
+            {segment.language ? `◆ ${segment.language}` : "◆ code"}
+          </text>
+          <text fg={colors.text} wrapMode="none" width="100%" minWidth={0} fontFamily="monospace">
+            {segment.content}
+          </text>
+        </box>
+      );
+    case "diff":
+      return (
+        <box flexDirection="column" gap={0} width="100%" minWidth={0} backgroundColor={colors.bg} padding={1} borderStyle="single" borderColor={colors.muted}>
+          <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>◆ diff</text>
+          <For each={segment.hunks}>
+            {(hunk) => (
+              <box flexDirection="column" gap={0} width="100%" minWidth={0}>
+                <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true} fontFamily="monospace">
+                  @@ -{hunk.oldStart},{hunk.oldLines} +{hunk.newStart},{hunk.newLines} @@
+                </text>
+                <For each={hunk.lines}>
+                  {(line) => (
+                    <box
+                      flexDirection="row"
+                      width="100%"
+                      minWidth={0}
+                      height={1}
+                      minHeight={1}
+                      backgroundColor={
+                        line.type === "add" ? "#1a3a2a" : // green/blue background for added
+                        line.type === "remove" ? "#3a1a1a" : // red background for removed
+                        colors.bg
+                      }
+                    >
+                      <text
+                        fg={line.type === "add" ? colors.mint : line.type === "remove" ? colors.red : colors.muted}
+                        wrapMode="none"
+                        width={4}
+                        minWidth={4}
+                        fontFamily="monospace"
+                      >
+                        {line.type === "add" ? "+ " : line.type === "remove" ? "- " : "  "}
+                      </text>
+                      <text
+                        fg={line.type === "add" ? colors.mint : line.type === "remove" ? colors.red : colors.text}
+                        wrapMode="none"
+                        flexGrow={1}
+                        minWidth={0}
+                        fontFamily="monospace"
+                      >
+                        {line.content}
+                      </text>
+                    </box>
+                  )}
+                </For>
+              </box>
+            )}
+          </For>
+        </box>
+      );
+  }
+}
+
 function App() {
   const [input, setInput] = createSignal("");
   const [cursorPos, setCursorPos] = createSignal(0);
@@ -72,11 +330,13 @@ function App() {
     { command: "/retry", description: "Retry the last user message" },
     { command: "/connect", description: "Configure NVIDIA API credentials" },
     { command: "/session", description: "List or resume sessions" },
+    { command: "/sessions", description: "List or resume sessions (alias)" },
     { command: "/session new", description: "Start a fresh session" },
     { command: "/session delete ", description: "Delete a session" },
     { command: "/session rename ", description: "Rename the active session" },
     { command: "/workspace", description: "Show workspace root" },
     { command: "/capabilities", description: "Show real harness capabilities" },
+    { command: "/limits", description: "Show current agent limits (rounds/calls) and config keys" },
     { command: "/project", description: "Inspect project type, manifests, README, and .gitignore" },
     { command: "/command ", description: "Preview a restricted terminal command" },
     { command: "/run", description: "Approve and run the pending command" },
@@ -99,13 +359,22 @@ function App() {
     // Keep the picker compact; typing filters the complete command list.
     return commands.filter((item) => item.command.trim().startsWith(value)).slice(0, commandLimit());
   });
+  // Reset commandIndex when suggestions change (filter typed)
+  createEffect(() => {
+    commandSuggestions();
+    setCommandIndex(0);
+  });
   const [messages, setMessages] = createSignal<ViewMessage[]>([
     { role: "assistant", content: "mrrp! I'm MINT. Type a message to chat, or /help for commands. ♡" },
   ]);
+  const [mode, setMode] = createSignal<"plan" | "build">("plan");
+  const [modeLocked, setModeLocked] = createSignal(false);
+  const toggleMode = () => setMode((m) => (m === "plan" ? "build" : "plan"));
   const [models, setModels] = createSignal<NvidiaModel[]>([]);
   const [model, setModel] = createSignal("");
   const [status, setStatus] = createSignal("starting");
   const [busy, setBusy] = createSignal(false);
+  const [runCatSpeed, setRunCatSpeed] = createSignal<"trot" | "run" | "sprint">("run");
   const [notice, setNotice] = createSignal("Connecting to NVIDIA…");
   let workspaceTools: WorkspaceTools | undefined;
   let terminalTools: ApprovedTerminal | undefined;
@@ -144,6 +413,20 @@ function App() {
   // Session picker state
   const [sessionPickerOpen, setSessionPickerOpen] = createSignal(false);
   const [sessionPickerIndex, setSessionPickerIndex] = createSignal(0);
+  const [sessionPickerHoverIndex, setSessionPickerHoverIndex] = createSignal(-1);
+  const [sessionPickerSessions, setSessionPickerSessions] = createSignal<Session[]>([]);
+  const [sessionPickerQuery, setSessionPickerQuery] = createSignal("");
+
+  // Filtered sessions memo for type-to-filter
+  const filteredSessions = createMemo(() => {
+    const q = sessionPickerQuery().trim().toLowerCase();
+    if (!q) return sessionPickerSessions();
+    return sessionPickerSessions().filter((s) =>
+      (s.title || "unnamed").toLowerCase().includes(q) ||
+      (s.model || "").toLowerCase().includes(q) ||
+      s.id.toLowerCase().includes(q)
+    );
+  });
 
   const catMenuItems = [
     { label: "Pet the cat", shortcut: "1", detail: "Give MINT some affection" },
@@ -263,6 +546,22 @@ function App() {
   const commandPaletteHeader = () =>
     terminal().width >= 64 ? "COMMANDS  ·  ↑/↓ select  ·  Tab complete" : "COMMANDS  ·  ↑/↓  ·  Tab";
 
+  const modelPickerHeader = () => {
+    const filtered = filterModels(mergeCurrentModel(models(), configuredModel || model() || ""), modelPickerQuery());
+    const q = modelPickerQuery();
+    if (terminal().width >= 72) {
+      return `MODELS · ${filtered.length}${q ? ` · filter "${q}"▌` : " · type to filter · ↑/↓ · Enter"}`;
+    }
+    return `MODELS · ${filtered.length}${q ? ` · "${q}"` : " · ↑/↓ · Enter"}`;
+  };
+
+  // Model picker suggestions memo - full filtered list (windowing handled in render)
+  const modelPickerSuggestions = createMemo(() => {
+    const allModels = mergeCurrentModel(models(), configuredModel || model() || "");
+    const filtered = filterModels(allModels, modelPickerQuery());
+    return filtered;
+  });
+
   const getSessionTitle = () => {
     const sid = session();
     if (sid) {
@@ -327,14 +626,22 @@ function App() {
     }
   };
 
+  // Track the configured base URL separately from the model
+  const [configuredBaseUrl, setConfiguredBaseUrl] = createSignal("https://integrate.api.nvidia.com/v1");
+
   // Connect popup handlers
   const openConnectPopup = () => {
     setConnectDraft({
       apiKey: "",
-      baseUrl: configuredModel ? "" : "https://integrate.api.nvidia.com/v1",
+      baseUrl: configuredBaseUrl() || "https://integrate.api.nvidia.com/v1",
       model: model() || configuredModel || "",
     });
-    setConnectCursor({ apiKey: 0, baseUrl: 0, model: 0 });
+    // Place cursors at the end of prefilled values
+    setConnectCursor({
+      apiKey: 0,
+      baseUrl: (configuredBaseUrl() || "https://integrate.api.nvidia.com/v1").length,
+      model: (model() || configuredModel || "").length,
+    });
     setConnectField("apiKey");
     setConnectError("");
     setConnectBusy(false);
@@ -398,19 +705,15 @@ function App() {
       return true;
     }
     if (key.name === "backspace") {
-      if (cursor > 0) {
-        const { value: newValue, cursor: newCursor } = insertAtCursor(value, cursor, "");
-        setConnectFieldValue(field, newValue);
-        setConnectFieldCursor(field, newCursor);
-      }
+      const { value: newValue, cursor: newCursor } = deleteBeforeCursor(value, cursor);
+      setConnectFieldValue(field, newValue);
+      setConnectFieldCursor(field, newCursor);
       return true;
     }
     if (key.name === "delete") {
-      if (cursor < value.length) {
-        const { value: newValue, cursor: newCursor } = insertAtCursor(value, cursor, "");
-        setConnectFieldValue(field, newValue.slice(0, cursor) + value.slice(cursor + 1));
-        setConnectFieldCursor(field, cursor);
-      }
+      const { value: newValue, cursor: newCursor } = deleteAtCursor(value, cursor);
+      setConnectFieldValue(field, newValue);
+      setConnectFieldCursor(field, newCursor);
       return true;
     }
     if (key.name === "left") {
@@ -517,6 +820,7 @@ function App() {
       setModel(mergedConfig.preferredModel || list[0].id);
       setModels(list);
       setStatus("connected");
+      setConfiguredBaseUrl(baseUrl);
       setNotice(`NVIDIA connected ✓ (${list.length} models)`);
       showToast(`Connected to NVIDIA ✓ (${list.length} models)`);
       closeConnectPopup();
@@ -615,12 +919,12 @@ function App() {
       return true;
     }
     if (key.name === "pageup") {
-      const pageSize = Math.max(1, Math.floor((terminal().height - 12) / 1));
+      const pageSize = commandLimit();
       setModelPickerIndex(pagePickerIndex(index, pageSize, count, -1));
       return true;
     }
     if (key.name === "pagedown") {
-      const pageSize = Math.max(1, Math.floor((terminal().height - 12) / 1));
+      const pageSize = commandLimit();
       setModelPickerIndex(pagePickerIndex(index, pageSize, count, 1));
       return true;
     }
@@ -651,6 +955,20 @@ function App() {
     if (key.ctrl && key.name === "u") {
       setModelPickerQuery("");
       setModelPickerIndex(0);
+      return true;
+    }
+    // Paste into model picker filter (Ctrl+Shift+V, Shift+Insert, Ctrl+V)
+    if ((key.ctrl && key.shift && key.name === "v") || (key.ctrl && key.name === "v") || (key.name === "insert" && key.shift)) {
+      void readClipboardText().then((text) => {
+        if (text) {
+          const { text: sanitized, truncated } = sanitizePastedText(text);
+          if (sanitized) {
+            setModelPickerQuery((q) => q + sanitized);
+            setModelPickerIndex(0);
+            if (truncated) showToast(`Paste truncated to ${MAX_PASTE_CHARS} chars`);
+          }
+        }
+      });
       return true;
     }
     if (key.sequence && key.sequence.length === 1 && !key.ctrl) {
@@ -781,26 +1099,38 @@ function App() {
   };
 
   const openSessionPicker = () => {
-    setSessionPickerOpen(true);
-    setSessionPickerIndex(0);
     const sessions = store.listSessions();
-    if (sessions.length === 0) {
-      setMessages((old) => [...old, { role: "assistant", content: "No saved sessions yet. Send a message to create your first session." }]);
-      setSessionPickerOpen(false);
-      return;
+    setSessionPickerSessions(sessions);
+    setSessionPickerQuery("");
+    setSessionPickerHoverIndex(-1);
+    // Pre-select current session if it exists in the list
+    const currentSid = session();
+    if (currentSid) {
+      const idx = sessions.findIndex((s) => s.id === currentSid);
+      if (idx >= 0) setSessionPickerIndex(idx);
+    } else {
+      setSessionPickerIndex(0);
     }
-    const listing = sessions.map((s, i) => `${i + 1}. ${s.title || "unnamed"}  [${s.model || "no model"}]  #${s.id}  ${new Date(s.created_at).toLocaleString()}`).join("\n");
-    setMessages((old) => [...old, { role: "assistant", content: `Sessions (↑/↓ to navigate, Enter to resume, Esc to cancel):\n${listing}` }]);
+    setSessionPickerOpen(true);
     setNotice("session picker open");
+  };
+
+  const closeSessionPicker = () => {
+    setSessionPickerOpen(false);
+    setSessionPickerSessions([]);
+    setSessionPickerHoverIndex(-1);
+    setNotice("session picker closed");
   };
 
   const handleSessionPickerInput = async (text: string) => {
     // In the picker, we interpret input as navigation or direct selection
-    const sessions = store.listSessions();
+    const sessions = sessionPickerSessions();
+    if (sessions.length === 0) {
+      closeSessionPicker();
+      return;
+    }
     if (text === "escape" || text === "esc") {
-      setSessionPickerOpen(false);
-      setMessages((old) => [...old, { role: "assistant", content: "Session picker closed." }]);
-      setNotice("session picker closed");
+      closeSessionPicker();
       return;
     }
     if (text === "up" || text === "k") {
@@ -814,7 +1144,7 @@ function App() {
     if (text === "enter" || text === "") {
       const selected = sessions[sessionPickerIndex()];
       if (selected) {
-        setSessionPickerOpen(false);
+        closeSessionPicker();
         resumeSession(selected.id);
       }
       return;
@@ -822,7 +1152,7 @@ function App() {
     // Allow direct number entry
     const num = parseInt(text, 10);
     if (!isNaN(num) && num >= 1 && num <= sessions.length) {
-      setSessionPickerOpen(false);
+      closeSessionPicker();
       resumeSession(sessions[num - 1].id);
       return;
     }
@@ -832,13 +1162,7 @@ function App() {
     const rawText = input();
     const text = rawText.trim();
 
-    // Handle session picker input
-    if (sessionPickerOpen()) {
-      await handleSessionPickerInput(text);
-      setInput("");
-      setCursorPos(0);
-      return;
-    }
+    if ((!text && !awaitingWritePath) || (busy() && text !== "/cancel")) return;
 
     if ((!text && !awaitingWritePath) || (busy() && text !== "/cancel")) return;
 
@@ -969,8 +1293,8 @@ No file has been changed. Review this preview, then type /apply to approve or /r
       openConnectPopup();
       return;
     }
-    if (text === "/session" || text.startsWith("/session ")) {
-      await handleSessionCommand(text);
+    if (text === "/session" || text.startsWith("/session ") || text === "/sessions" || text.startsWith("/sessions ")) {
+      await handleSessionCommand(text.replace(/^\/sessions/, "/session"));
       return;
     }
     if (text === "/workspace") {
@@ -1050,13 +1374,17 @@ No file has been changed. Review this preview, then type /apply to approve or /r
     if (text === "/capabilities") {
       const capabilities = getCapabilities(Boolean(workspaceTools));
       const listing = capabilities.map((item) => `${item.available ? "[available]" : "[unavailable]"} ${item.id} — ${item.description}`).join("\n");
-      setMessages((old) => [...old, { role: "assistant", content: `MINT harness capabilities\nWorkspace: ${workspaceTools?.root ?? "not ready"}\n\n${listing}` }]);
+      setMessages((old) => [...old, { role: "assistant", content: `MINT harness capabilities\nWorkspace: ${workspaceTools?.root ?? "not ready"}\n\n${listing}\n\n${formatAgentLimits(agentLimits)}` }]);
+      return;
+    }
+    if (text === "/limits") {
+      setMessages((old) => [...old, { role: "assistant", content: formatAgentLimits(agentLimits) }]);
       return;
     }
     if (text === "/help") {
       setMessages((old) => [...old, {
         role: "assistant",
-        content: "Commands: /help · /cat · /pet · /feed · /expressions · /expression <id> · /models · /model · /connect · /session · /session new · /session delete <id> · /session rename · /workspace · /project · /capabilities · /ls [path] · /read <path> · /search <text> · /propose <path> · /apply · /reject · /command <program args> · /run · /reject-command · /cancel · /clear · /quit\n\nFile changes require explicit /apply approval. Terminal commands are restricted, previewed, and run only after explicit /run approval. Web browsing remains unavailable.",
+        content: "Commands: /help · /cat · /pet · /feed · /expressions · /expression <id> · /models · /model · /connect · /session · /session new · /session delete <id> · /session rename · /workspace · /project · /capabilities · /limits · /ls [path] · /read <path> · /search <text> · /propose <path> · /apply · /reject · /command <program args> · /run · /reject-command · /cancel · /clear · /quit\n\nFile changes require explicit /apply approval. Terminal commands are restricted, previewed, and run only after explicit /run approval. Web browsing remains unavailable.",
       }]);
       return;
     }
@@ -1104,6 +1432,7 @@ No file has been changed. Review this preview, then type /apply to approve or /r
     const updatedHistory: ChatMessage[] = [systemMessage(), ...history().filter((message) => message.role !== "system"), { role: "user", content: text }];
     setHistory(updatedHistory);
     setBusy(true);
+    setRunCatSpeed("trot");
     setCatMood("thinking");
     activeController = new AbortController();
     setNotice(`thinking with ${model()}…`);
@@ -1120,6 +1449,7 @@ No file has been changed. Review this preview, then type /apply to approve or /r
         const registeredTools = getModelTools(Boolean(workspaceTools));
         for await (const event of client.streamAgent(model(), workingHistory, registeredTools, activeController.signal)) {
           if (event.type === "content") {
+            setRunCatSpeed("run");
             answer += event.content;
             setMessages((old) => {
               const next = [...old];
@@ -1156,6 +1486,7 @@ No file has been changed. Review this preview, then type /apply to approve or /r
         });
         let proposalPreview: string | undefined;
         for (const call of requestedCalls) {
+          setRunCatSpeed("sprint");
           setNotice(`running ${call.function.name}…`);
           const result = pendingProposalId && ["workspace_propose_write", "workspace_propose_patch"].includes(call.function.name)
             ? { ok: false as const, error: "A file proposal is already pending. Ask the user to /apply or /reject it before creating another." }
@@ -1237,7 +1568,7 @@ No file has been changed. Review this preview, then type /apply to approve or /r
 
   const catAnimationTimer = setInterval(() => {
     if (catProfile().animationsEnabled) setCatFrame((frame) => (frame + 1) % 12);
-  }, 650);
+  }, 500);
   onCleanup(() => clearInterval(catAnimationTimer));
 
   // Paste handler (terminal bracketed paste)
@@ -1289,7 +1620,7 @@ No file has been changed. Review this preview, then type /apply to approve or /r
     // Global copy/paste shortcuts (work when not in popup)
     if (!connectOpen() && !sessionPickerOpen() && !catMenuOpen() && !modelPickerOpen() && !renameOpen()) {
       // Ctrl+Shift+V or Ctrl+V or Shift+Insert - paste from clipboard
-      if (((key.ctrl && key.shift && key.name === "v") || (key.ctrl && key.name === "v") || (key.name === "insert" && key.shift)) && !key.meta) {
+      if ((key.ctrl && key.shift && key.name === "v") || (key.ctrl && key.name === "v") || (key.name === "insert" && key.shift)) {
         void readClipboardText().then((text) => {
           if (text) {
             const { text: sanitized, truncated } = sanitizePastedText(text);
@@ -1347,20 +1678,39 @@ No file has been changed. Review this preview, then type /apply to approve or /r
     }
 
     if (sessionPickerOpen()) {
-      if (key.name === "escape") { setSessionPickerOpen(false); setMessages((old) => [...old, { role: "assistant", content: "Session picker closed." }]); setNotice("session picker closed"); return; }
-      if (key.name === "up") { setSessionPickerIndex((old) => (old - 1 + store.listSessions().length) % store.listSessions().length); return; }
-      if (key.name === "down") { setSessionPickerIndex((old) => (old + 1) % store.listSessions().length); return; }
+      const sessions = filteredSessions();
+      const count = sessions.length;
+      if (count === 0) { closeSessionPicker(); return; }
+      let index = sessionPickerIndex();
+      if (key.name === "escape") { closeSessionPicker(); return; }
+      if (key.name === "up") { setSessionPickerIndex(movePickerIndex(index, -1, count)); return; }
+      if (key.name === "down") { setSessionPickerIndex(movePickerIndex(index, 1, count)); return; }
+      if (key.name === "pageup") { setSessionPickerIndex(pagePickerIndex(index, commandLimit(), count, -1)); return; }
+      if (key.name === "pagedown") { setSessionPickerIndex(pagePickerIndex(index, commandLimit(), count, 1)); return; }
+      if (key.name === "home") { setSessionPickerIndex(homeEndIndex(index, count, true)); return; }
+      if (key.name === "end") { setSessionPickerIndex(homeEndIndex(index, count, false)); return; }
       if (key.name === "return") {
-        const sessions = store.listSessions();
         const selected = sessions[sessionPickerIndex()];
-        if (selected) { setSessionPickerOpen(false); resumeSession(selected.id); }
+        if (selected) { closeSessionPicker(); resumeSession(selected.id); }
+        return;
+      }
+      if (key.name === "backspace") {
+        setSessionPickerQuery((q) => q.slice(0, -1));
+        setSessionPickerIndex(0);
+        return;
+      }
+      if (key.ctrl && key.name === "u") {
+        setSessionPickerQuery("");
+        setSessionPickerIndex(0);
         return;
       }
       // Allow number keys 1-9 for direct selection
       const num = parseInt(key.sequence || "", 10);
-      if (!isNaN(num) && num >= 1 && num <= 9) {
-        const sessions = store.listSessions();
-        if (num <= sessions.length) { setSessionPickerOpen(false); resumeSession(sessions[num - 1].id); }
+      if (!isNaN(num) && num >= 1 && num <= count) { closeSessionPicker(); resumeSession(sessions[num - 1].id); return; }
+      // Printable characters for filter
+      if (key.sequence && key.sequence.length === 1 && !key.ctrl) {
+        setSessionPickerQuery((q) => q + key.sequence);
+        setSessionPickerIndex(0);
         return;
       }
       return;
@@ -1389,6 +1739,7 @@ No file has been changed. Review this preview, then type /apply to approve or /r
       return;
     }
     if (key.name === "f2") { setCatMenuOpen(true); setCatMenuIndex(0); return; }
+    if (key.shift && key.name === "tab") { toggleMode(); return; }
     if (key.name === "up" && suggestions.length) {
       setCommandIndex((old) => (old - 1 + suggestions.length) % suggestions.length);
       return;
@@ -1455,6 +1806,151 @@ No file has been changed. Review this preview, then type /apply to approve or /r
     }
   });
 
+  // Modal frame - full-screen backdrop with centered popup (wrapped in <Show> by caller)
+  const ModalFrame = ({
+    onClose,
+    title,
+    children,
+    width = 80,
+    minWidth = 40,
+    borderColor = colors.lavender,
+    topOffset = 2,
+    leftOffset = 2,
+    onMouseScroll,
+  }: {
+    onClose: () => void;
+    title: string;
+    children: JSX.Element;
+    width?: number;
+    minWidth?: number;
+    borderColor?: string;
+    topOffset?: number;
+    leftOffset?: number;
+    onMouseScroll?: (e: { scroll?: { direction: "up" | "down" | "left" | "right"; delta: number } }) => void;
+  }) => {
+    return (
+      <box
+        position="absolute"
+        top={0}
+        left={0}
+        width="100%"
+        height="100%"
+        zIndex={100}
+        onMouseDown={onClose}
+      >
+        <box
+          position="absolute"
+          top={Math.max(topOffset, Math.floor(terminal().height / 2) - Math.min(15, Math.floor((terminal().height - 8) / 2)))}
+          left={Math.max(leftOffset, Math.floor((terminal().width - Math.min(width, terminal().width - 4)) / 2))}
+          width={Math.min(width, terminal().width - 4)}
+          minWidth={minWidth}
+          backgroundColor={colors.panel}
+          borderStyle="rounded"
+          borderColor={borderColor}
+          padding={1}
+          gap={1}
+          flexShrink={0}
+          zIndex={101}
+          onMouseDown={(e) => e.stopPropagation()}
+          onMouseScroll={onMouseScroll}
+        >
+          <box flexDirection="row" gap={1} width="100%" minWidth={0} overflow="hidden">
+            <text fg={borderColor} wrapMode="none" flexShrink={1} truncate={true}>{title}</text>
+          </box>
+          {children}
+        </box>
+      </box>
+    );
+  };
+
+  // Action button for modal footers
+  const ActionButton = ({
+    label,
+    onClick,
+    disabled = false,
+    variant = "primary",
+    width = "auto",
+  }: {
+    label: string;
+    onClick: () => void;
+    disabled?: boolean;
+    variant?: "primary" | "secondary" | "danger";
+    width?: number | "auto" | `${number}%`;
+  }) => (
+    <box
+      flexDirection="row"
+      justifyContent="center"
+      width={width}
+      minWidth={0}
+      height={1}
+      minHeight={1}
+      backgroundColor={disabled ? colors.muted : variant === "primary" ? colors.lavender : variant === "danger" ? colors.red : colors.panel}
+      borderStyle={variant === "primary" ? undefined : "single"}
+      borderColor={variant === "secondary" ? colors.muted : variant === "danger" ? colors.red : colors.lavender}
+      paddingLeft={2}
+      paddingRight={2}
+      onMouseDown={(e) => { e.stopPropagation(); if (!disabled) onClick(); }}
+    >
+      <text
+        fg={disabled ? colors.text : variant === "primary" ? colors.bg : colors.text}
+        wrapMode="none"
+        truncate={true}
+      >
+        {label}
+      </text>
+    </box>
+  );
+
+  // List row component for mouse-interactive lists
+  const ListRow = <T,>({
+    item,
+    index,
+    selectedIndex,
+    onSelect,
+    onClick,
+    renderItem,
+    hoverIndex,
+    setHoverIndex,
+    disabled = false,
+  }: {
+    item: T;
+    index: number;
+    selectedIndex: number;
+    onSelect: (index: number) => void;
+    onClick?: (item: T, index: number) => void;
+    renderItem: (item: T, index: number, isSelected: boolean, isHovered: boolean) => JSX.Element;
+    hoverIndex: number;
+    setHoverIndex: (index: number) => void;
+    disabled?: boolean;
+  }) => {
+    const isSelected = index === selectedIndex;
+    const isHovered = index === hoverIndex;
+    return (
+      <box
+        width="100%"
+        minWidth={0}
+        height={1}
+        minHeight={1}
+        overflow="hidden"
+        backgroundColor={isSelected ? colors.lavender : isHovered ? colors.muted : colors.panel}
+        onMouseMove={() => { if (!disabled) setHoverIndex(index); }}
+        onMouseOut={() => { if (!disabled) setHoverIndex(-1); }}
+        onMouseDown={(e) => { e.stopPropagation(); if (!disabled) onSelect(index); }}
+        onMouseUp={(e) => { e.stopPropagation(); if (!disabled && onClick) onClick(item, index); }}
+      >
+        {renderItem(item, index, isSelected, isHovered)}
+      </box>
+    );
+  };
+
+  // Scroll helper for mouse wheel
+  const handleWheel = (event: { scroll?: { direction: "up" | "down" | "left" | "right"; delta: number } }, setter: (delta: number) => void) => {
+    if (event.scroll) {
+      const delta = event.scroll.direction === "up" ? -event.scroll.delta : event.scroll.direction === "down" ? event.scroll.delta : 0;
+      if (delta !== 0) setter(delta);
+    }
+  };
+
   return (
     <box flexDirection="column" backgroundColor={colors.bg} width="100%" height="100%">
       <box flexDirection="row" justifyContent="space-between" backgroundColor={colors.panel} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
@@ -1490,73 +1986,31 @@ No file has been changed. Review this preview, then type /apply to approve or /r
         <Show when={sidebarVisible()}>
         <box flexDirection="column" backgroundColor={colors.panel} padding={1} width={32} minWidth={28} height="100%" minHeight={0} flexShrink={0} gap={1} overflow="hidden">
           <box flexDirection="column" gap={0} flexShrink={0} onMouseDown={() => { setCatMenuOpen((open) => !open); setCatMenuIndex(0); setCatExpressionPicker(false); }}>
-            <For each={catSprite(catProfile().selectedExpression, catFrame(), catMood())}>{(line) => <text fg={catMood() === "error" ? colors.red : catMood() === "happy" || catMood() === "love" ? colors.pink : colors.lavender}>{line}</text>}</For>
-            <text fg={colors.pink}>[ MINT THE CAT ]</text>
-            <text fg={colors.muted}>click or press F2 · /cat</text>
+            <CatPortrait
+              height={terminal().height > 22 ? (terminal().height > 32 ? 12 : Math.max(6, terminal().height - 22)) : 6}
+              expression={catProfile().selectedExpression as CatExpressionId}
+              mood={catMood()}
+              frame={catFrame()}
+              animated={catProfile().animationsEnabled}
+            />
+            <text fg={colors.pink} textAlign="center">MINT THE CAT</text>
+            <text fg={colors.muted} textAlign="center">click or press F2 · /cat</text>
           </box>
           <text fg={colors.muted} width="100%" minWidth={0} flexShrink={0} wrapMode="none" truncate={true}>{catProfile().pets} pets · {catProfile().treats} treats</text>
-          <scrollbox flexGrow={1} minHeight={0} width="100%" minWidth={0} contentOptions={{ flexDirection: "column", gap: 1 }}>
-          <Show when={catMenuOpen()}>
-            <box flexDirection="column" borderStyle="rounded" borderColor={colors.pink} padding={1} gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
-              <Show when={catExpressionPicker()}>
-                <text fg={colors.pink}>--- EXPRESSIONS ---</text>
-                <For each={CAT_EXPRESSIONS}>{(expression, index) =>
-                  <box
-                    flexDirection="row"
-                    width="100%"
-                    minWidth={0}
-                    height={1}
-                    minHeight={1}
-                    overflow="hidden"
-                    backgroundColor={index() === catExpressionIndex() ? colors.lavender : colors.panel}
-                  >
-                    <text
-                      fg={index() === catExpressionIndex() ? colors.bg : catProfile().unlockedExpressions.includes(expression.id) ? colors.text : colors.muted}
-                      wrapMode="none"
-                      width="100%"
-                      minWidth={0}
-                      truncate={true}
-                    >
-                      {(index() === catExpressionIndex() ? "❯ " : "  ") + (catProfile().unlockedExpressions.includes(expression.id) ? "◆ " : "× ") + expression.label}
-                    </text>
-                  </box>
-                }</For>
-                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>↑/↓ choose · Enter · Esc</text>
-              </Show>
-              <Show when={!catExpressionPicker()}>
-                <text fg={colors.pink}>--- CAT MENU ---</text>
-                <For each={catMenuItems}>{(item, index) =>
-                  <box
-                    flexDirection="row"
-                    width="100%"
-                    minWidth={0}
-                    height={1}
-                    minHeight={1}
-                    overflow="hidden"
-                    backgroundColor={index() === catMenuIndex() ? colors.lavender : colors.panel}
-                  >
-                    <text
-                      fg={index() === catMenuIndex() ? colors.bg : colors.text}
-                      wrapMode="none"
-                      width="100%"
-                      minWidth={0}
-                      truncate={true}
-                    >
-                      {(index() === catMenuIndex() ? "❯ " : "  ") + item.shortcut + "  " + item.label}
-                    </text>
-                  </box>
-                }</For>
-                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>{"· " + (catMenuItems[catMenuIndex()]?.detail ?? "")}</text>
-                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>↑/↓ + Enter · Esc close</text>
-              </Show>
-            </box>
-          </Show>
-        </scrollbox>
-        <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0}>
+          <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0}>
           <Show when={session()}>
             <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>────────────────</text>
             <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none" truncate={true}>SESSION</text>
-            <text fg={colors.text} width="100%" minWidth={0} wrapMode="none" truncate={true}>{getSessionTitle()}</text>
+            <text
+              fg={colors.text}
+              width="100%"
+              minWidth={0}
+              wrapMode="none"
+              truncate={true}
+              onMouseUp={(e) => { e.stopPropagation(); openRenamePopup(); }}
+            >
+              {getSessionTitle()}
+            </text>
             <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>#{session()}</text>
           </Show>
           <Show when={!session()}>
@@ -1567,15 +2021,28 @@ No file has been changed. Review this preview, then type /apply to approve or /r
           </Show>
           <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>────────────────</text>
           <text fg={colors.mint} width="100%" minWidth={0} wrapMode="none" truncate={true}>MODEL</text>
-          <text fg={colors.text} width="100%" minWidth={0} wrapMode="none" truncate={true}>{model() || "not selected"}</text>
+          <text
+            fg={colors.text}
+            width="100%"
+            minWidth={0}
+            wrapMode="none"
+            truncate={true}
+            onMouseUp={(e) => { e.stopPropagation(); openModelPicker(); }}
+          >
+            {model() || "not selected"}
+          </text>
           <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>────────────────</text>
           <text fg={colors.peach} width="100%" minWidth={0} wrapMode="none" truncate={true}>STATUS</text>
-          <text fg={colors.text} width="100%" minWidth={0} wrapMode="none" truncate={true}>{notice()}</text>
-          <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>────────────────</text>
-          <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>/model  choose model</text>
-          <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>/cat   interact</text>
-          <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>/ls    list files</text>
-          <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>/help  all commands</text>
+          <text
+            fg={colors.text}
+            width="100%"
+            minWidth={0}
+            wrapMode="none"
+            truncate={true}
+            onMouseUp={(e) => { e.stopPropagation(); openConnectPopup(); }}
+          >
+            {notice()}
+          </text>
         </box>
       </box>
       </Show>
@@ -1590,61 +2057,6 @@ No file has been changed. Review this preview, then type /apply to approve or /r
               </box>
             </Show>
           </box>
-          <Show when={!sidebarVisible() && catMenuOpen()}>
-            <box flexDirection="column" borderStyle="rounded" borderColor={colors.pink} padding={1} gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
-              <Show when={catExpressionPicker()}>
-                <text fg={colors.pink}>✦ CAT EXPRESSIONS ✦</text>
-                <For each={CAT_EXPRESSIONS}>{(expression, index) =>
-                  <box
-                    flexDirection="row"
-                    width="100%"
-                    minWidth={0}
-                    height={1}
-                    minHeight={1}
-                    overflow="hidden"
-                    backgroundColor={index() === catExpressionIndex() ? colors.lavender : colors.panel}
-                  >
-                    <text
-                      fg={index() === catExpressionIndex() ? colors.bg : catProfile().unlockedExpressions.includes(expression.id) ? colors.text : colors.muted}
-                      wrapMode="none"
-                      width="100%"
-                      minWidth={0}
-                      truncate={true}
-                    >
-                      {(index() === catExpressionIndex() ? "❯ " : "  ") + (catProfile().unlockedExpressions.includes(expression.id) ? "◆ " : "× ") + expression.label}
-                    </text>
-                  </box>
-                }</For>
-                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>↑/↓ choose · Enter · Esc</text>
-              </Show>
-              <Show when={!catExpressionPicker()}>
-                <text fg={colors.pink}>--- CAT MENU ---</text>
-                <For each={catMenuItems}>{(item, index) =>
-                  <box
-                    flexDirection="row"
-                    width="100%"
-                    minWidth={0}
-                    height={1}
-                    minHeight={1}
-                    overflow="hidden"
-                    backgroundColor={index() === catMenuIndex() ? colors.lavender : colors.panel}
-                  >
-                    <text
-                      fg={index() === catMenuIndex() ? colors.bg : colors.text}
-                      wrapMode="none"
-                      width="100%"
-                      minWidth={0}
-                      truncate={true}
-                    >
-                      {(index() === catMenuIndex() ? "❯ " : "  ") + item.shortcut + "  " + item.label}
-                    </text>
-                  </box>
-                }</For>
-                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>{"· " + (catMenuItems[catMenuIndex()]?.detail ?? "")}</text>
-                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>↑/↓ + Enter · Esc close</text>
-              </Show>
-            </box>
-          </Show>
           <scrollbox flexGrow={1} minHeight={0} minWidth={0} width="100%" contentOptions={{ flexDirection: "column", gap: 1 }} stickyScroll={true} stickyStart="bottom">
             <For each={messages()}>
               {(message) => (
@@ -1652,57 +2064,76 @@ No file has been changed. Review this preview, then type /apply to approve or /r
                   <text fg={message.role === "user" ? colors.mint : message.role === "system" ? colors.muted : colors.pink}>
                     {message.role === "user" ? "you ❯" : "mint ♡ · answer"}
                   </text>
-                  <text fg={colors.text} wrapMode="word" width="100%">{message.content || (busy() ? "Waiting for the response…" : "")}</text>
+                  <box flexDirection="column" gap={0} width="100%" minWidth={0}>
+                    {message.content
+                      ? parseMessageSegments(message.content).map((seg) => renderSegment(seg, colors))
+                      : busy()
+                      ? <text fg={colors.peach} wrapMode="word" width="100%">Waiting for the response…</text>
+                      : null
+                    }
+                  </box>
                 </box>
               )}
             </For>
           </scrollbox>
-          <Show when={commandSuggestions().length > 0}>
-            <box backgroundColor={colors.bg} borderStyle="rounded" borderColor={colors.lavender} padding={1} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
+          <Show when={commandSuggestions().length > 0 && !modelPickerOpen()}>
+            <box backgroundColor={colors.bg} borderStyle="rounded" borderColor={colors.lavender} padding={1} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden" onMouseScroll={(e) => { e.stopPropagation(); }}>
               <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
                 <text fg={colors.lavender} wrapMode="none" width="100%" minWidth={0} truncate={true}>{commandPaletteHeader()}</text>
               </box>
-              <For each={commandSuggestions()}>{(item, index) =>
-                <box
-                  flexDirection="row"
-                  width="100%"
-                  minWidth={0}
-                  height={1}
-                  minHeight={1}
-                  overflow="hidden"
-                  backgroundColor={index() === commandIndex() ? colors.lavender : colors.bg}
-                >
-                  <text
-                    fg={index() === commandIndex() ? colors.bg : colors.mint}
-                    width={24}
-                    maxWidth="100%"
+              <For each={commandSuggestions()}>{(item, index) => {
+                return (
+                  <box
+                    flexDirection="row"
+                    width="100%"
                     minWidth={0}
-                    flexShrink={1}
-                    marginRight={1}
-                    wrapMode="none"
-                    truncate={true}
+                    height={1}
+                    minHeight={1}
+                    overflow="hidden"
+                    backgroundColor={index() === commandIndex() ? colors.lavender : colors.bg}
+                    onMouseMove={() => { setCommandIndex(index()); }}
+                    onMouseUp={(e) => { e.stopPropagation(); const value = input(); const selected = commandSuggestions()[index()]; if (selected) { const completed = selected.command.trimEnd(); const nextValue = completed + (selected.command.endsWith(" ") ? " " : ""); setInput(nextValue); setCursorPos(nextValue.length); if (selected.command.trim() === value.trim()) void send(); } }}
                   >
-                    {(index() === commandIndex() ? "❯ " : "  ") + item.command.trimEnd()}
-                  </text>
-                  <Show when={terminal().width >= 72}>
                     <text
-                      fg={index() === commandIndex() ? colors.bg : colors.muted}
-                      flexGrow={1}
+                      fg={index() === commandIndex() ? colors.bg : colors.mint}
+                      width={24}
+                      maxWidth="100%"
                       minWidth={0}
+                      flexShrink={1}
+                      marginRight={1}
                       wrapMode="none"
                       truncate={true}
                     >
-                      {item.description}
+                      {(index() === commandIndex() ? "❯ " : "  ") + item.command.trimEnd()}
                     </text>
-                  </Show>
-                </box>
-              }</For>
+                    <Show when={terminal().width >= 72}>
+                      <text
+                        fg={index() === commandIndex() ? colors.bg : colors.muted}
+                        flexGrow={1}
+                        minWidth={0}
+                        wrapMode="none"
+                        truncate={true}
+                      >
+                        {item.description}
+                      </text>
+                    </Show>
+                  </box>
+                );
+              }}</For>
             </box>
           </Show>
           <box backgroundColor={colors.bg} padding={1} flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
-            <text fg={colors.mint} width="100%" minWidth={0} wrapMode="char">❯ {input().slice(0, cursorPos())}▌{input().slice(cursorPos())}</text><Show when={busy()}><text fg={colors.peach} width="100%" minWidth={0} wrapMode="none" truncate={true}>· generating answer</text></Show>
-            <Show when={terminal().height >= 24 && commandSuggestions().length === 0}>
-              <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>{inputHint()}</text>
+            <text fg={colors.mint} width="100%" minWidth={0} wrapMode="char">❯ {input().slice(0, cursorPos())}▌{input().slice(cursorPos())}</text>
+              <box flexDirection="row" gap={2} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
+              <text fg={mode() === "plan" ? colors.lavender : colors.mint} wrapMode="none">
+                {mode() === "plan" ? "◆ PLAN MODE" : "◆ BUILD MODE"}
+              </text>
+              <text fg={colors.muted} wrapMode="none">Shift+Tab to toggle</text>
+            </box>
+            <Show when={busy()}>
+              <box flexDirection="row" gap={1} width="100%" minWidth={0} flexShrink={0} overflow="hidden" paddingLeft={1}>
+                <RunCatIndicator busy={true} speed={runCatSpeed()} />
+              </box>
             </Show>
           </box>
         </box>
@@ -1723,6 +2154,7 @@ No file has been changed. Review this preview, then type /apply to approve or /r
           borderColor={colors.mint}
           paddingLeft={1}
           paddingRight={1}
+          onMouseUp={(e) => { e.stopPropagation(); setToast(null); if (toastTimer) clearTimeout(toastTimer); }}
         >
           <text fg={colors.mint} wrapMode="none" truncate={true} width={40}>{toast()}</text>
         </box>
@@ -1730,140 +2162,26 @@ No file has been changed. Review this preview, then type /apply to approve or /r
 
       {/* Connect popup */}
       <Show when={connectOpen()}>
-        <box
-          position="absolute"
-          top={Math.max(2, Math.floor(terminal().height / 2) - 10)}
-          left={Math.max(2, Math.floor((terminal().width - Math.min(72, terminal().width - 4)) / 2))}
-          width={Math.min(72, terminal().width - 4)}
+        <ModalFrame
+          onClose={closeConnectPopup}
+          title="✿ CONNECT NVIDIA"
+          width={72}
           minWidth={40}
-          backgroundColor={colors.panel}
-          borderStyle="rounded"
           borderColor={colors.pink}
-          padding={1}
-          gap={1}
-          flexShrink={0}
         >
-          <text fg={colors.pink} wrapMode="none" width="100%">✿ CONNECT NVIDIA</text>
-          <box flexDirection="column" gap={1} width="100%">
-            <box flexDirection="row" gap={1} width="100%" minWidth={0}>
-              <text fg={connectField() === "apiKey" ? colors.pink : colors.muted} wrapMode="none" width={8}>API KEY</text>
-              <box
-                flexGrow={1}
-                minWidth={0}
-                backgroundColor={colors.bg}
-                borderStyle="single"
-                borderColor={connectField() === "apiKey" ? colors.pink : colors.muted}
-                paddingLeft={1}
-                paddingRight={1}
-                overflow="hidden"
-              >
-                <text
-                  fg={colors.text}
-                  wrapMode="none"
-                  width="100%"
-                  minWidth={0}
-                  truncate={true}
-                >
-                  {maskSecret(connectFieldValue("apiKey")).slice(Math.max(0, connectFieldCursor("apiKey") - 36))}▌
-                </text>
-              </box>
-            </box>
-            <box flexDirection="row" gap={1} width="100%" minWidth={0}>
-              <text fg={connectField() === "baseUrl" ? colors.pink : colors.muted} wrapMode="none" width={8}>BASE URL</text>
-              <box
-                flexGrow={1}
-                minWidth={0}
-                backgroundColor={colors.bg}
-                borderStyle="single"
-                borderColor={connectField() === "baseUrl" ? colors.pink : colors.muted}
-                paddingLeft={1}
-                paddingRight={1}
-                overflow="hidden"
-              >
-                <text
-                  fg={colors.text}
-                  wrapMode="none"
-                  width="100%"
-                  minWidth={0}
-                  truncate={true}
-                >
-                  {connectFieldValue("baseUrl").slice(Math.max(0, connectFieldCursor("baseUrl") - 36))}▌
-                </text>
-              </box>
-            </box>
-            <box flexDirection="row" gap={1} width="100%" minWidth={0}>
-              <text fg={connectField() === "model" ? colors.pink : colors.muted} wrapMode="none" width={8}>MODEL</text>
-              <box
-                flexGrow={1}
-                minWidth={0}
-                backgroundColor={colors.bg}
-                borderStyle="single"
-                borderColor={connectField() === "model" ? colors.pink : colors.muted}
-                paddingLeft={1}
-                paddingRight={1}
-                overflow="hidden"
-              >
-                <text
-                  fg={colors.text}
-                  wrapMode="none"
-                  width="100%"
-                  minWidth={0}
-                  truncate={true}
-                >
-                  {connectFieldValue("model").slice(Math.max(0, connectFieldCursor("model") - 36))}▌
-                </text>
-              </box>
-            </box>
-          </box>
-          <Show when={connectError()}>
-            <text fg={colors.red} wrapMode="none" width="100%" minWidth={0} truncate={true}>{connectError()}</text>
-          </Show>
-          <Show when={connectBusy()}>
-            <text fg={colors.peach} wrapMode="none" width="100%" minWidth={0} truncate={true}>· testing connection… (Esc to cancel)</text>
-          </Show>
-          <Show when={!connectBusy()}>
-            <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>Tab next · Shift+Tab prev · Enter connect · Esc cancel · Ctrl+Shift+V paste</text>
-          </Show>
-        </box>
-      </Show>
-
-      {/* Model picker */}
-      <Show when={modelPickerOpen()}>
-        <box
-          position="absolute"
-          top={Math.max(2, Math.floor(terminal().height / 2) - Math.min(15, Math.floor((terminal().height - 8) / 2)))}
-          left={Math.max(2, Math.floor((terminal().width - Math.min(80, terminal().width - 4)) / 2))}
-          width={Math.min(80, terminal().width - 4)}
-          minWidth={40}
-          backgroundColor={colors.panel}
-          borderStyle="rounded"
-          borderColor={colors.lavender}
-          padding={1}
-          gap={1}
-          flexShrink={0}
-        >
-          <box flexDirection="row" gap={1} width="100%" minWidth={0} overflow="hidden">
-            <text fg={colors.lavender} wrapMode="none" flexShrink={1} truncate={true}>
-              {modelPickerBusy() ? "⟳" : "✧"} MODELS · {filterModels(mergeCurrentModel(models(), configuredModel || model() || ""), modelPickerQuery()).length} available
-            </text>
-            <Show when={configuredModel || model()}>
-              <text fg={colors.muted} wrapMode="none" flexShrink={0}>current: {configuredModel || model()}</text>
-            </Show>
-          </box>
-          <Show when={modelPickerError()}>
-            <text fg={colors.red} wrapMode="none" width="100%" minWidth={0} truncate={true}>Error: {modelPickerError()}</text>
-          </Show>
+        <box flexDirection="column" gap={1} width="100%">
           <box flexDirection="row" gap={1} width="100%" minWidth={0}>
-            <text fg={colors.muted} wrapMode="none" width={7}>search</text>
+            <text fg={connectField() === "apiKey" ? colors.pink : colors.muted} wrapMode="none" width={8}>API KEY</text>
             <box
               flexGrow={1}
               minWidth={0}
               backgroundColor={colors.bg}
               borderStyle="single"
-              borderColor={colors.lavender}
+              borderColor={connectField() === "apiKey" ? colors.pink : colors.muted}
               paddingLeft={1}
               paddingRight={1}
               overflow="hidden"
+              onMouseDown={(e) => { e.stopPropagation(); setConnectField("apiKey"); setConnectFieldCursor("apiKey", connectFieldValue("apiKey").length); }}
             >
               <text
                 fg={colors.text}
@@ -1872,97 +2190,315 @@ No file has been changed. Review this preview, then type /apply to approve or /r
                 minWidth={0}
                 truncate={true}
               >
-                {modelPickerQuery()}▌
+                {maskSecret(connectFieldValue("apiKey")).slice(Math.max(0, connectFieldCursor("apiKey") - 36))}▌
               </text>
             </box>
           </box>
-          <Show when={filterModels(mergeCurrentModel(models(), configuredModel || model() || ""), modelPickerQuery()).length > 0}>
-            <scrollbox flexGrow={1} minHeight={0} width="100%" minWidth={0} contentOptions={{ flexDirection: "column", gap: 0 }}>
-              <For each={visibleWindow(modelPickerIndex(), Math.max(1, terminal().height - 14), filterModels(mergeCurrentModel(models(), configuredModel || model() || ""), modelPickerQuery()).length)}>
-                {(absoluteIndex) => {
-                  const allModels = filterModels(mergeCurrentModel(models(), configuredModel || model() || ""), modelPickerQuery());
-                  const m = allModels[absoluteIndex];
-                  if (!m) return <text> </text>;
-                  return (
-                    <box
-                      flexDirection="row"
-                      width="100%"
-                      minWidth={0}
-                      height={1}
-                      minHeight={1}
-                      overflow="hidden"
-                      backgroundColor={absoluteIndex === modelPickerIndex() ? colors.lavender : colors.panel}
-                    >
-                      <text
-                        fg={absoluteIndex === modelPickerIndex() ? colors.bg : m.id === (configuredModel || model()) ? colors.mint : colors.text}
-                        wrapMode="none"
-                        width="100%"
-                        minWidth={0}
-                        truncate={true}
-                      >
-                        {(absoluteIndex === modelPickerIndex() ? "❯ " : "  ") + m.id + (m.id === (configuredModel || model()) ? " ●" : "") + (m.owned_by ? " · " + m.owned_by : "")}
-                      </text>
-                    </box>
-                  );
-                }}
-              </For>
-            </scrollbox>
-          </Show>
-          <Show when={filterModels(mergeCurrentModel(models(), configuredModel || model() || ""), modelPickerQuery()).length === 0 && !modelPickerBusy()}>
-            <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>No models match "{modelPickerQuery()}". Press Ctrl+R to refresh catalog.</text>
+          <box flexDirection="row" gap={1} width="100%" minWidth={0}>
+            <text fg={connectField() === "baseUrl" ? colors.pink : colors.muted} wrapMode="none" width={8}>BASE URL</text>
+            <box
+              flexGrow={1}
+              minWidth={0}
+              backgroundColor={colors.bg}
+              borderStyle="single"
+              borderColor={connectField() === "baseUrl" ? colors.pink : colors.muted}
+              paddingLeft={1}
+              paddingRight={1}
+              overflow="hidden"
+              onMouseDown={(e) => { e.stopPropagation(); setConnectField("baseUrl"); setConnectFieldCursor("baseUrl", connectFieldValue("baseUrl").length); }}
+            >
+              <text
+                fg={colors.text}
+                wrapMode="none"
+                width="100%"
+                minWidth={0}
+                truncate={true}
+              >
+                {connectFieldValue("baseUrl").slice(Math.max(0, connectFieldCursor("baseUrl") - 36))}▌
+              </text>
+            </box>
+          </box>
+          <box flexDirection="row" gap={1} width="100%" minWidth={0}>
+            <text fg={connectField() === "model" ? colors.pink : colors.muted} wrapMode="none" width={8}>MODEL</text>
+            <box
+              flexGrow={1}
+              minWidth={0}
+              backgroundColor={colors.bg}
+              borderStyle="single"
+              borderColor={connectField() === "model" ? colors.pink : colors.muted}
+              paddingLeft={1}
+              paddingRight={1}
+              overflow="hidden"
+              onMouseDown={(e) => { e.stopPropagation(); setConnectField("model"); setConnectFieldCursor("model", connectFieldValue("model").length); }}
+            >
+              <text
+                fg={colors.text}
+                wrapMode="none"
+                width="100%"
+                minWidth={0}
+                truncate={true}
+              >
+                {connectFieldValue("model").slice(Math.max(0, connectFieldCursor("model") - 36))}▌
+              </text>
+            </box>
+          </box>
+        </box>
+        <Show when={connectError()}>
+          <text fg={colors.red} wrapMode="none" width="100%" minWidth={0} truncate={true}>{connectError()}</text>
+        </Show>
+        <Show when={connectBusy()}>
+          <text fg={colors.peach} wrapMode="none" width="100%" minWidth={0} truncate={true}>· testing connection… (Esc to cancel)</text>
+        </Show>
+        <Show when={!connectBusy()}>
+          <box flexDirection="row" gap={1} justifyContent="flex-end" width="100%">
+            <ActionButton label="Cancel" onClick={closeConnectPopup} variant="secondary" />
+            <ActionButton label="Connect" onClick={submitConnect} variant="primary" disabled={connectBusy()} />
+          </box>
+        </Show>
+      </ModalFrame>
+      </Show>
+
+      {/* Model picker (inline, same slot as command palette) */}
+      <Show when={modelPickerOpen()}>
+        <box backgroundColor={colors.bg} borderStyle="rounded" borderColor={colors.lavender} padding={1} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden" onMouseScroll={(e) => handleWheel(e, (d) => setModelPickerIndex(movePickerIndex(modelPickerIndex(), d, modelPickerSuggestions().length)))} >
+          <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
+            <text fg={colors.lavender} wrapMode="none" width="100%" minWidth={0} truncate={true}>{modelPickerHeader()}</text>
+          </box>
+          <Show when={modelPickerError()}>
+            <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
+              <text fg={colors.red} wrapMode="none" width="100%" minWidth={0} truncate={true}>Error: {modelPickerError()}</text>
+            </box>
           </Show>
           <Show when={modelPickerBusy()}>
-            <text fg={colors.peach} wrapMode="none" width="100%" minWidth={0} truncate={true}>⟳ fetching models…</text>
+            <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
+              <text fg={colors.peach} wrapMode="none" width="100%" minWidth={0} truncate={true}>⟳ fetching models…</text>
+            </box>
           </Show>
-          <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>↑/↓ move · PgUp/PgDn · Home/End · type filter · Enter use · Esc close · Ctrl+R refresh</text>
+          <Show when={modelPickerSuggestions().length > 0 && !modelPickerBusy()}>
+            <For each={visibleWindow(modelPickerIndex(), commandLimit(), modelPickerSuggestions().length)}>{(idx) => {
+              const allModels = filterModels(mergeCurrentModel(models(), configuredModel || model() || ""), modelPickerQuery());
+              const m = allModels[idx];
+              if (!m) return <text> </text>;
+              const isCurrent = m.id === (configuredModel || model());
+              return (
+                <box
+                  flexDirection="row"
+                  width="100%"
+                  minWidth={0}
+                  height={1}
+                  minHeight={1}
+                  overflow="hidden"
+                  backgroundColor={idx === modelPickerIndex() ? colors.lavender : colors.bg}
+                  onMouseMove={() => { setModelPickerIndex(idx); }}
+                  onMouseUp={(e) => { e.stopPropagation(); void applyModel(m.id); }}
+                >
+                  <text
+                    fg={idx === modelPickerIndex() ? colors.bg : isCurrent ? colors.mint : colors.text}
+                    width={terminal().width >= 80 ? 48 : terminal().width >= 60 ? 36 : 28}
+                    maxWidth="100%"
+                    minWidth={0}
+                    flexShrink={1}
+                    marginRight={1}
+                    wrapMode="none"
+                    truncate={true}
+                  >
+                    {(idx === modelPickerIndex() ? "❯ " : "  ") + m.id + (isCurrent ? " ●" : "")}
+                  </text>
+                  <Show when={terminal().width >= 72 && m.owned_by}>
+                    <text
+                      fg={idx === modelPickerIndex() ? colors.bg : colors.muted}
+                      flexGrow={1}
+                      minWidth={0}
+                      wrapMode="none"
+                      truncate={true}
+                    >
+                      {m.owned_by}
+                    </text>
+                  </Show>
+                </box>
+              );
+            }}</For>
+          </Show>
+          <Show when={modelPickerSuggestions().length === 0 && !modelPickerBusy() && !modelPickerError()}>
+            <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
+              <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>No models match "{modelPickerQuery()}". Press Ctrl+R to refresh catalog.</text>
+            </box>
+          </Show>
+          <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>↑/↓ · PgUp/PgDn · Home/End · type filter · Enter use · Esc close · Ctrl+R refresh · Ctrl+U clear</text>
         </box>
       </Show>
 
       {/* Rename popup */}
       <Show when={renameOpen()}>
-        <box
-          position="absolute"
-          top={Math.max(2, Math.floor(terminal().height / 2) - 4)}
-          left={Math.max(2, Math.floor((terminal().width - Math.min(60, terminal().width - 4)) / 2))}
-          width={Math.min(60, terminal().width - 4)}
+        <ModalFrame
+          onClose={closeRenamePopup}
+          title="✎ RENAME SESSION"
+          width={60}
           minWidth={30}
-          backgroundColor={colors.panel}
-          borderStyle="rounded"
           borderColor={colors.pink}
-          padding={1}
-          gap={1}
-          flexShrink={0}
         >
-          <text fg={colors.pink} wrapMode="none" width="100%">✎ RENAME SESSION</text>
-          <box flexDirection="row" gap={1} width="100%" minWidth={0}>
-            <text fg={colors.muted} wrapMode="none" width={5}>name</text>
-            <box
-              flexGrow={1}
+        <box flexDirection="row" gap={1} width="100%" minWidth={0}>
+          <text fg={colors.muted} wrapMode="none" width={5}>name</text>
+          <box
+            flexGrow={1}
+            minWidth={0}
+            backgroundColor={colors.bg}
+            borderStyle="single"
+            borderColor={colors.pink}
+            paddingLeft={1}
+            paddingRight={1}
+            overflow="hidden"
+          >
+            <text
+              fg={colors.text}
+              wrapMode="none"
+              width="100%"
               minWidth={0}
-              backgroundColor={colors.bg}
-              borderStyle="single"
-              borderColor={colors.pink}
-              paddingLeft={1}
-              paddingRight={1}
-              overflow="hidden"
+              truncate={true}
             >
-              <text
-                fg={colors.text}
-                wrapMode="none"
-                width="100%"
-                minWidth={0}
-                truncate={true}
-              >
-                {renameDraft()}▌
-              </text>
-            </box>
+              {renameDraft()}▌
+            </text>
           </box>
-          <Show when={renameError()}>
-            <text fg={colors.red} wrapMode="none" width="100%" minWidth={0} truncate={true}>{renameError()}</text>
-          </Show>
-          <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>Enter save · Esc cancel · Ctrl+Shift+V paste</text>
         </box>
+        <Show when={renameError()}>
+          <text fg={colors.red} wrapMode="none" width="100%" minWidth={0} truncate={true}>{renameError()}</text>
+        </Show>
+        <box flexDirection="row" gap={1} justifyContent="flex-end" width="100%">
+          <ActionButton label="Cancel" onClick={closeRenamePopup} variant="secondary" />
+          <ActionButton label="Save" onClick={applyRename} variant="primary" />
+        </box>
+        <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>Enter save · Esc cancel · Ctrl+Shift+V paste</text>
+      </ModalFrame>
+    </Show>
+
+      {/* Session picker modal */}
+      <Show when={sessionPickerOpen()}>
+        <ModalFrame
+          onClose={closeSessionPicker}
+          title={`✧ SESSIONS · ${filteredSessions().length}${sessionPickerQuery() ? ` · filter "${sessionPickerQuery()}"▌` : ""}`}
+          width={80}
+          minWidth={50}
+          borderColor={colors.lavender}
+          onMouseScroll={(e) => handleWheel(e, (d) => setSessionPickerIndex(movePickerIndex(sessionPickerIndex(), d, filteredSessions().length)))}
+        >
+          <Show when={filteredSessions().length === 0}>
+            <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>No saved sessions yet.</text>
+            <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>Send a message to create your first session.</text>
+          </Show>
+          <Show when={filteredSessions().length > 0}>
+            <For each={visibleWindow(sessionPickerIndex(), commandLimit(), filteredSessions().length)}>{(idx) => {
+              const s = filteredSessions()[idx];
+              return (
+                <box
+                  flexDirection="row"
+                  width="100%"
+                  minWidth={0}
+                  height={1}
+                  minHeight={1}
+                  overflow="hidden"
+                  backgroundColor={idx === sessionPickerIndex() ? colors.lavender : colors.panel}
+                  onMouseMove={(e) => { e.stopPropagation(); setSessionPickerIndex(idx); }}
+                  onMouseUp={(e) => { e.stopPropagation(); closeSessionPicker(); resumeSession(s.id); }}
+                >
+                  <text
+                    fg={idx === sessionPickerIndex() ? colors.bg : colors.text}
+                    wrapMode="none"
+                    width="100%"
+                    minWidth={0}
+                    truncate={true}
+                  >
+                    {(idx === sessionPickerIndex() ? "❯ " : "  ") + (s.title || "unnamed") + "  " + (s.model ? "[" + s.model + "]" : "[no model]") + "  #" + s.id}
+                  </text>
+                </box>
+              );
+            }}</For>
+          </Show>
+          <box flexDirection="row" gap={1} justifyContent="space-between" width="100%">
+            <ActionButton label="New Session" onClick={() => { closeSessionPicker(); startNewSession(); }} variant="primary" />
+            <ActionButton label="Close" onClick={closeSessionPicker} variant="secondary" />
+          </box>
+          <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>↑/↓ move · PgUp/PgDn · Home/End · type filter · 1-9 select · Enter resume · Esc close · Ctrl+U clear</text>
+        </ModalFrame>
       </Show>
+
+      {/* Cat menu modal */}
+      <Show when={catMenuOpen()}>
+        <ModalFrame
+          onClose={() => { setCatMenuOpen(false); setCatExpressionPicker(false); }}
+          title="✿ MINT THE CAT"
+          width={terminal().width >= 80 ? 76 : 56}
+          minWidth={36}
+          borderColor={colors.pink}
+        >
+        <box flexDirection={terminal().width >= 80 ? "row" : "column"} gap={2} width="100%" minWidth={0} alignItems={terminal().width >= 80 ? "flex-start" : "center"}>
+          <CatPortrait
+            height={terminal().width >= 80 ? Math.min(24, terminal().height - 8) : 18}
+            expression={catProfile().selectedExpression as CatExpressionId}
+            mood={catMood()}
+            frame={catFrame()}
+            animated={catProfile().animationsEnabled}
+          />
+          <box flexDirection="column" gap={1} width="100%" minWidth={0} flexGrow={1}>
+            <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true} textAlign={terminal().width >= 80 ? "left" : "center"}>{catProfile().pets} pets · {catProfile().treats} treats</text>
+            <Show when={catExpressionPicker()}>
+              <text fg={colors.pink}>--- EXPRESSIONS ---</text>
+              <For each={CAT_EXPRESSIONS}>{(expression, index) =>
+                <box
+                  flexDirection="row"
+                  width="100%"
+                  minWidth={0}
+                  height={1}
+                  minHeight={1}
+                  overflow="hidden"
+                  backgroundColor={index() === catExpressionIndex() ? colors.lavender : colors.panel}
+                  onMouseMove={() => { setCatExpressionIndex(index()); }}
+                  onMouseUp={(e) => { e.stopPropagation(); if (catProfile().unlockedExpressions.includes(expression.id)) equipCatExpression(expression.id); }}
+                >
+                  <text
+                    fg={index() === catExpressionIndex() ? colors.bg : catProfile().unlockedExpressions.includes(expression.id) ? colors.text : colors.muted}
+                    wrapMode="none"
+                    width="100%"
+                    minWidth={0}
+                    truncate={true}
+                  >
+                    {(index() === catExpressionIndex() ? "❯ " : "  ") + (catProfile().unlockedExpressions.includes(expression.id) ? "◆ " : "× ") + expression.label}
+                  </text>
+                </box>
+              }</For>
+              <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>↑/↓ choose · Enter · Esc · Click to equip</text>
+            </Show>
+            <Show when={!catExpressionPicker()}>
+              <text fg={colors.pink}>--- CAT MENU ---</text>
+              <For each={catMenuItems}>{(item, index) =>
+                <box
+                  flexDirection="row"
+                  width="100%"
+                  minWidth={0}
+                  height={1}
+                  minHeight={1}
+                  overflow="hidden"
+                  backgroundColor={index() === catMenuIndex() ? colors.lavender : colors.panel}
+                  onMouseMove={() => { setCatMenuIndex(index()); }}
+                  onMouseUp={(e) => { e.stopPropagation(); const actionByIndex = ["pet", "feed", "expressions", "toggle-animations", "close"] as const; runCatAction(actionByIndex[index()] ?? "close"); }}
+                >
+                  <text
+                    fg={index() === catMenuIndex() ? colors.bg : colors.text}
+                    wrapMode="none"
+                    width="100%"
+                    minWidth={0}
+                    truncate={true}
+                  >
+                    {(index() === catMenuIndex() ? "❯ " : "  ") + item.shortcut + "  " + item.label}
+                  </text>
+                </box>
+              }</For>
+              <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>{"· " + (catMenuItems[catMenuIndex()]?.detail ?? "")}</text>
+              <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>↑/↓ + Enter · Esc close · Click to run</text>
+            </Show>
+          </box>
+        </box>
+      </ModalFrame>
+    </Show>
     </box>
   );
 }

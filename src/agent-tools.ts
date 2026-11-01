@@ -40,7 +40,7 @@ export function buildSystemPrompt(workspaceReady: boolean, workspaceRoot?: strin
     "CAPABILITY RULES:",
     "- This list is generated from the active harness registry. Treat it as the source of truth; do not replace it with generic assumptions.",
     "- Use registered tools when they materially help. A tool call is an action request, not proof of success; rely on the returned tool result.",
-    `- The harness allows at most ${maxToolRounds} tool rounds and ${maxToolCallsPerTurn} total tool calls per user turn. Limits are enforced by the harness. Avoid repeating a tool call when its arguments and result are unchanged.`,
+    `- The harness allows at most ${maxToolRounds} tool rounds and ${maxToolCallsPerTurn} total tool calls per user turn, enforced per turn. These are configurable in \`.env\` with \`MINT_MAX_TOOL_ROUNDS\` and \`MINT_MAX_TOOL_CALLS_PER_TURN\` (positive integers; restart MINT after changing). Avoid repeating a tool call when its arguments and result are unchanged.`,
     "- Never claim a file was read/changed, a command was run, a website was browsed, or an external action was completed unless a tool result confirms it.",
     "- Workspace paths are restricted to the configured root. Do not claim access to arbitrary files elsewhere on the user's machine.",
     "- File edits must use the proposal workflow. Prefer targeted exact-text patches for small edits; use full-file replacement only when appropriate. Never bypass approval; explain that the user must review the diff and run /apply.",

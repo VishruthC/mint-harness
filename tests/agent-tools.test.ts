@@ -23,10 +23,16 @@ describe("MINT harness capability registry", () => {
     expect(prompt).toContain("terminal.approved_execute");
     expect(prompt).toContain("explicitly type /run");
     expect(prompt).toContain("12 tool rounds and 24 total tool calls");
+    expect(prompt).toContain("MINT_MAX_TOOL_ROUNDS");
+    expect(prompt).toContain("MINT_MAX_TOOL_CALLS_PER_TURN");
+    expect(prompt).toContain("restart MINT");
   });
 
   test("system prompt reflects custom limits", () => {
     const prompt = buildSystemPrompt(true, "/workspace/demo", { maxToolRounds: 4, maxToolCallsPerTurn: 9 });
     expect(prompt).toContain("4 tool rounds and 9 total tool calls");
+    expect(prompt).toContain("MINT_MAX_TOOL_ROUNDS");
+    expect(prompt).toContain("MINT_MAX_TOOL_CALLS_PER_TURN");
+    expect(prompt).toContain("restart MINT");
   });
 });

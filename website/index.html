@@ -1,0 +1,1187 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MINT — A small harness with sharp little claws.</title>
+    <meta
+      name="description"
+      content="MINT is a terminal-native coding harness for NVIDIA models. It reads your workspace, proposes changes, and waits for your approval. It also has a cat."
+    />
+    <meta name="theme-color" content="#f3eee5" />
+    <meta name="color-scheme" content="light" />
+    <link rel="canonical" href="https://vishruthc.github.io/mint-harness/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="MINT" />
+    <meta property="og:title" content="MINT — A small harness with sharp little claws." />
+    <meta
+      property="og:description"
+      content="A terminal-native coding harness for NVIDIA models. It reads your workspace, proposes changes, and waits for your approval. It also has a cat."
+    />
+    <meta property="og:url" content="https://vishruthc.github.io/mint-harness/" />
+    <meta property="og:image" content="https://vishruthc.github.io/mint-harness/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="MINT field notes: a paper social card with the MINT cat in a dark terminal specimen frame."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="MINT — A small harness with sharp little claws." />
+    <meta
+      name="twitter:description"
+      content="A terminal-native coding harness for NVIDIA models. Approval-gated edits, bounded reads, and one persistent pixel cat."
+    />
+    <meta name="twitter:image" content="https://vishruthc.github.io/mint-harness/og.png" />
+    <meta
+      name="twitter:image:alt"
+      content="MINT field notes: a paper social card with the MINT cat in a dark terminal specimen frame."
+    />
+
+    <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
+    <link rel="preconnect" href="https://github.com" />
+
+    <script>
+      document.documentElement.classList.add("js");
+      if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        document.documentElement.classList.add("motion");
+        window.setTimeout(function () {
+          if (!document.documentElement.classList.contains("motion-ready")) {
+            document.documentElement.classList.remove("motion");
+          }
+        }, 2600);
+      }
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <div class="scroll-progress" aria-hidden="true"><span data-scroll-progress></span></div>
+
+    <header class="site-header" data-header>
+      <a class="brand" href="#top" aria-label="MINT — back to top">
+        <span class="brand-flower" aria-hidden="true">✿</span>
+        <span class="brand-name">MINT</span>
+        <span class="brand-sub">tiny coding companion</span>
+      </a>
+
+      <nav class="site-nav" aria-label="Chapters">
+        <a href="#loop"><span>01</span> Loop</a>
+        <a href="#read"><span>02</span> Read</a>
+        <a href="#approve"><span>03</span> Approve</a>
+        <a href="#remember"><span>04</span> Remember</a>
+        <a href="#cat"><span>05</span> Cat</a>
+        <a href="#limits"><span>06</span> Limits</a>
+      </nav>
+
+      <div class="header-actions">
+        <a
+          class="header-github"
+          href="https://github.com/VishruthC/mint-harness"
+          target="_blank"
+          rel="noreferrer"
+        >
+          GitHub <span aria-hidden="true">↗</span>
+        </a>
+        <button class="index-trigger" type="button" data-index-open aria-haspopup="dialog">
+          <span>Index</span>
+          <kbd data-kbd>⌘K</kbd>
+        </button>
+      </div>
+    </header>
+
+    <nav class="chapter-rail" aria-label="Chapter progress">
+      <span class="rail-line" aria-hidden="true"></span>
+      <a href="#top" class="rail-dot is-active" data-rail="top" aria-label="00 — Top"><span>00</span></a>
+      <a href="#loop" class="rail-dot" data-rail="loop" aria-label="01 — The loop"><span>01</span></a>
+      <a href="#read" class="rail-dot" data-rail="read" aria-label="02 — It reads"><span>02</span></a>
+      <a href="#approve" class="rail-dot" data-rail="approve" aria-label="03 — The gate"><span>03</span></a>
+      <a href="#remember" class="rail-dot" data-rail="remember" aria-label="04 — Sessions"><span>04</span></a>
+      <a href="#cat" class="rail-dot" data-rail="cat" aria-label="05 — The cat"><span>05</span></a>
+      <a href="#limits" class="rail-dot" data-rail="limits" aria-label="06 — Limits"><span>06</span></a>
+    </nav>
+
+    <main id="main" tabindex="-1">
+      <!-- 00 — HERO -->
+      <section id="top" class="hero" data-section="top">
+        <div class="hero-field" aria-hidden="true">
+          <span class="hero-field-grid"></span>
+          <span class="hero-field-label">FIELD NOTES / 00</span>
+        </div>
+
+        <div class="wrap hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow" data-reveal>
+              <span class="status-dot"></span>
+              MINT / a terminal-native coding harness
+            </p>
+
+            <h1 class="hero-title">
+              <span class="line"><span data-hero-line>A small harness</span></span>
+              <span class="line"><span data-hero-line>with <em>sharp little</em></span></span>
+              <span class="line"><span data-hero-line><em>claws.</em></span></span>
+            </h1>
+
+            <p class="hero-lede" data-reveal>
+              MINT is a terminal-native coding companion for NVIDIA models. It reads your
+              workspace, proposes changes, and waits for your yes. It also has a cat.
+            </p>
+
+            <div class="hero-actions" data-reveal>
+              <a class="button button--primary" href="#loop">
+                See how it works <span aria-hidden="true">↓</span>
+              </a>
+              <a
+                class="button button--ghost"
+                href="https://github.com/VishruthC/mint-harness"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Source on GitHub <span aria-hidden="true">↗</span>
+              </a>
+            </div>
+
+            <dl class="hero-meta" data-reveal>
+              <div>
+                <dt>Runtime</dt>
+                <dd>Bun 1.3.14+</dd>
+              </div>
+              <div>
+                <dt>Interface</dt>
+                <dd>OpenTUI + Solid</dd>
+              </div>
+              <div>
+                <dt>Model</dt>
+                <dd>NVIDIA NIM</dd>
+              </div>
+              <div>
+                <dt>Status</dt>
+                <dd><span class="status-dot"></span> v0.1.0 · in development</dd>
+              </div>
+            </dl>
+          </div>
+
+          <figure class="hero-specimen" data-hero-specimen data-reveal>
+            <div class="tui" data-tui>
+              <div class="tui-top">
+                <div class="tui-brand"><span aria-hidden="true">✿</span> MINT</div>
+                <div class="tui-sub">tiny coding companion</div>
+                <div class="tui-session">✧ auth patch ✧</div>
+                <div class="tui-status"><span class="status-dot"></span> connected</div>
+              </div>
+
+              <div class="tui-body">
+                <aside class="tui-sidebar">
+                  <div class="tui-cat-wrap">
+                    <canvas
+                      class="tui-cat"
+                      data-hero-cat
+                      width="128"
+                      height="128"
+                      role="img"
+                      aria-label="MINT the pixel cat, rendered live"
+                    ></canvas>
+                  </div>
+                  <p class="tui-cat-title">MINT THE CAT</p>
+                  <p class="tui-cat-meta">12 pets · 7 treats</p>
+                  <div class="tui-rule" aria-hidden="true"></div>
+                  <p class="tui-label">SESSION</p>
+                  <p class="tui-value">auth patch review</p>
+                  <p class="tui-label">MODEL</p>
+                  <p class="tui-value tui-model">meta/llama-3.1-70b-instruct</p>
+                  <p class="tui-label">STATUS</p>
+                  <p class="tui-value tui-ok"><span class="status-dot"></span> connected</p>
+                </aside>
+
+                <div class="tui-chat">
+                  <div class="tui-chat-head">
+                    <span>✧ chat ✧</span>
+                    <span class="tui-hint">F2 cat</span>
+                  </div>
+
+                  <div class="tui-messages" data-tui-messages>
+                    <div class="tui-line tui-line--user" data-line="0">
+                      <span class="tui-role">you ❯</span>
+                      <span>where is the session token validated?</span>
+                    </div>
+                    <div class="tui-line tui-line--tool" data-line="1">
+                      <span class="tui-tool">·</span> workspace_search
+                      <span class="tui-string">"session token"</span>
+                    </div>
+                    <div class="tui-line tui-line--result" data-line="2">
+                      <span class="tui-tool">↳</span> src/auth/session.ts:42
+                    </div>
+                    <div class="tui-line tui-line--tool" data-line="3">
+                      <span class="tui-tool">·</span> workspace_read
+                      <span class="tui-string">src/auth/session.ts</span>
+                    </div>
+                    <div class="tui-line tui-line--proposal" data-line="4">
+                      <span class="tui-spark">✦</span> proposal · 1 patch
+                    </div>
+                    <div class="tui-line tui-line--diff" data-line="5">
+                      <span class="tui-del">-</span> if (!token) return null
+                    </div>
+                    <div class="tui-line tui-line--diff" data-line="6">
+                      <span class="tui-add">+</span> if (!token) throw new AuthError("missing token")
+                    </div>
+                    <div class="tui-line tui-line--wait" data-line="7">
+                      <span class="tui-tool">·</span> awaiting <span class="tui-key">/apply</span><span
+                        class="tui-caret tui-caret--inline"
+                      ></span>
+                    </div>
+                  </div>
+
+                  <div class="tui-input">
+                    <span class="tui-prompt">❯</span>
+                    <span class="tui-input-text" data-tui-input></span>
+                    <span class="tui-caret"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <figcaption class="specimen-caption">
+              <span class="specimen-fig">Fig. 00</span>
+              <span>A scripted replay of a real MINT turn. No API calls.</span>
+              <button class="text-button" type="button" data-replay>Replay turn ↻</button>
+            </figcaption>
+          </figure>
+        </div>
+
+        <div class="wrap hero-command-strip" aria-label="Real MINT commands">
+          <span class="strip-label">COMMANDS</span>
+          <div class="strip-items">
+            <code>/project</code>
+            <code>/capabilities</code>
+            <code>/propose</code>
+            <code>/apply</code>
+            <code>/command</code>
+            <code>/run</code>
+            <code>/pet</code>
+            <code>/cat</code>
+          </div>
+          <span class="strip-note">no web browsing · no external apps</span>
+        </div>
+      </section>
+
+      <!-- 01 — THE LOOP -->
+      <section id="loop" class="chapter chapter--dark chapter--loop" data-section="loop">
+        <div class="loop-pin" data-loop-pin>
+          <div class="wrap loop-layout">
+            <div class="loop-copy">
+              <header class="chapter-head chapter-head--dark">
+                <p class="chapter-number" data-reveal>01 / THE LOOP</p>
+                <h2 data-reveal>One turn, <em>end to end.</em></h2>
+                <p class="chapter-kicker" data-reveal>
+                  The registry is generated from the running harness. <code>/capabilities</code>
+                  shows what is actually available.
+                </p>
+              </header>
+
+              <ol class="loop-steps" data-loop-steps>
+                <li data-step data-at="0.0">
+                  <span class="step-num">01</span>
+                  <div>
+                    <strong>You ask.</strong>
+                    <p>A message enters the harness.</p>
+                  </div>
+                </li>
+                <li data-step data-at="0.098">
+                  <span class="step-num">02</span>
+                  <div>
+                    <strong>Registry builds the prompt.</strong>
+                    <p>Only registered capabilities are described.</p>
+                  </div>
+                </li>
+                <li data-step data-at="0.244">
+                  <span class="step-num">03</span>
+                  <div>
+                    <strong>NVIDIA NIM streams.</strong>
+                    <p>OpenAI-compatible tool calls, one turn at a time.</p>
+                  </div>
+                </li>
+                <li data-step data-at="0.39">
+                  <span class="step-num">04</span>
+                  <div>
+                    <strong>Tools read or propose.</strong>
+                    <p>Reads return data. Writes and commands stop at the gate.</p>
+                  </div>
+                </li>
+                <li data-step data-at="0.5">
+                  <span class="step-num">05</span>
+                  <div>
+                    <strong>You approve.</strong>
+                    <p><code>/apply</code> for patches. <code>/run</code> for commands. The model cannot self-approve.</p>
+                  </div>
+                </li>
+                <li data-step data-at="0.646">
+                  <span class="step-num">06</span>
+                  <div>
+                    <strong>The result returns.</strong>
+                    <p>Tool output goes back to the model.</p>
+                  </div>
+                </li>
+                <li data-step data-at="0.793">
+                  <span class="step-num">07</span>
+                  <div>
+                    <strong>The answer lands.</strong>
+                    <p>Bounded by 12 rounds and 24 calls per turn.</p>
+                  </div>
+                </li>
+              </ol>
+
+              <p class="loop-wait" data-loop-wait>
+                <span class="status-dot status-dot--peach"></span>
+                waiting for you
+              </p>
+            </div>
+
+            <div class="loop-visual" data-reveal>
+              <svg
+                class="loop-svg"
+                viewBox="0 0 760 640"
+                role="img"
+                aria-labelledby="loop-title loop-desc"
+              >
+                <title id="loop-title">One MINT turn, drawn as a circuit trace.</title>
+                <desc id="loop-desc">
+                  A path runs from you through the capability registry, NVIDIA NIM, a tool call,
+                  an approval gate, the workspace, and back to you. The pulse pauses at the gate
+                  until the user approves.
+                </desc>
+                <defs>
+                  <pattern id="loop-grid" width="32" height="32" patternUnits="userSpaceOnUse">
+                    <path d="M 32 0 L 0 0 0 32" fill="none" stroke="rgba(205,214,244,0.06)" stroke-width="1" />
+                  </pattern>
+                  <filter id="loop-glow" x="-200%" y="-200%" width="400%" height="400%">
+                    <feGaussianBlur stdDeviation="5" result="blur" />
+                    <feMerge>
+                      <feMergeNode in="blur" />
+                      <feMergeNode in="SourceGraphic" />
+                    </feMerge>
+                  </filter>
+                </defs>
+
+                <rect width="760" height="640" fill="url(#loop-grid)" />
+
+                <path
+                  class="trace-base"
+                  d="M 100 560 L 100 400 L 340 400 L 580 400 L 580 220 L 340 220 L 100 220 L 100 560"
+                />
+                <path
+                  class="trace-live"
+                  data-loop-path
+                  d="M 100 560 L 100 400 L 340 400 L 580 400 L 580 220 L 340 220 L 100 220 L 100 560"
+                />
+
+                <g class="loop-node" data-node data-at="0.0" transform="translate(100 560)">
+                  <rect x="-66" y="-27" width="132" height="54" rx="2" />
+                  <text class="node-kicker" x="-52" y="-6">00 / YOU</text>
+                  <text class="node-label" x="-52" y="14">the prompt</text>
+                </g>
+
+                <g class="loop-node" data-node data-at="0.098" transform="translate(100 400)">
+                  <rect x="-76" y="-30" width="152" height="60" rx="2" />
+                  <text class="node-kicker" x="-62" y="-8">01 / REGISTRY</text>
+                  <text class="node-label" x="-62" y="12">capabilities</text>
+                </g>
+
+                <g class="loop-node" data-node data-at="0.244" transform="translate(340 400)">
+                  <rect x="-72" y="-30" width="144" height="60" rx="2" />
+                  <text class="node-kicker" x="-58" y="-8">02 / NVIDIA NIM</text>
+                  <text class="node-label" x="-58" y="12">stream + tools</text>
+                </g>
+
+                <g class="loop-node" data-node data-at="0.39" transform="translate(580 400)">
+                  <rect x="-76" y="-30" width="152" height="60" rx="2" />
+                  <text class="node-kicker" x="-62" y="-8">03 / TOOL CALL</text>
+                  <text class="node-label" x="-62" y="12">read or propose</text>
+                </g>
+
+                <g class="loop-node loop-node--gate" data-node data-at="0.5" transform="translate(580 220)">
+                  <rect x="-78" y="-34" width="156" height="68" rx="2" />
+                  <text class="node-kicker" x="-64" y="-11">04 / APPROVAL</text>
+                  <text class="node-label" x="-64" y="10">you type /apply</text>
+                  <text class="node-gate" x="-64" y="26">or /run</text>
+                </g>
+
+                <g class="loop-node" data-node data-at="0.646" transform="translate(340 220)">
+                  <rect x="-76" y="-30" width="152" height="60" rx="2" />
+                  <text class="node-kicker" x="-62" y="-8">05 / WORKSPACE</text>
+                  <text class="node-label" x="-62" y="12">the change lands</text>
+                </g>
+
+                <g class="loop-node" data-node data-at="0.793" transform="translate(100 220)">
+                  <rect x="-66" y="-27" width="132" height="54" rx="2" />
+                  <text class="node-kicker" x="-52" y="-6">06 / ANSWER</text>
+                  <text class="node-label" x="-52" y="14">back to you</text>
+                </g>
+
+                <circle class="loop-pulse" data-loop-pulse cx="100" cy="560" r="5" />
+              </svg>
+
+              <div class="loop-legend" aria-label="Capability access states">
+                <span><i class="access access--read"></i> read</span>
+                <span><i class="access access--approval"></i> approval-required</span>
+                <span><i class="access access--unavailable"></i> unavailable</span>
+              </div>
+
+              <p class="specimen-caption specimen-caption--dark">
+                <span class="specimen-fig">Fig. 01</span>
+                <span>One turn, end to end. The pulse stops at the gate on purpose.</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 02 — IT READS -->
+      <section id="read" class="chapter chapter--paper chapter--read" data-section="read">
+        <div class="wrap">
+          <header class="chapter-head chapter-head--split">
+            <div>
+              <p class="chapter-number" data-reveal>02 / IT READS</p>
+              <h2 data-reveal>It looks <em>before it leaps.</em></h2>
+            </div>
+            <p class="chapter-kicker" data-reveal>
+              Reads are bounded. Writes are proposals. Sensitive files stay shut.
+            </p>
+          </header>
+
+          <div class="read-grid">
+            <div class="read-copy">
+              <p class="drop-line" data-reveal>
+                MINT launches inside a workspace. It can list, read, search, and discover project
+                context — but it cannot wander outside the root, follow a symlink into the rest of
+                your machine, or open the files you keep private.
+              </p>
+
+              <div class="note-list">
+                <article class="note" data-reveal>
+                  <span class="note-num">01</span>
+                  <div>
+                    <h3>Only inside the workspace.</h3>
+                    <p>Paths are resolved and symlink targets are canonicalized. Outside means outside.</p>
+                  </div>
+                </article>
+                <article class="note" data-reveal>
+                  <span class="note-num">02</span>
+                  <div>
+                    <h3>Sensitive files stay shut.</h3>
+                    <p><code>.env</code>, <code>.env.*</code>, <code>id_rsa</code>, <code>id_ed25519</code>, <code>*.pem</code>, and <code>*.key</code> are refused by name.</p>
+                  </div>
+                </article>
+                <article class="note" data-reveal>
+                  <span class="note-num">03</span>
+                  <div>
+                    <h3>Generated noise is skipped.</h3>
+                    <p><code>.gitignore</code> is respected alongside built-in exclusions for <code>node_modules</code>, <code>dist</code>, <code>coverage</code>, and friends.</p>
+                  </div>
+                </article>
+                <article class="note" data-reveal>
+                  <span class="note-num">04</span>
+                  <div>
+                    <h3>Bounded by default.</h3>
+                    <p>Reads cap at 256 KB. Search caps at 1 MB per file, 1,500 files, and 100 matches.</p>
+                  </div>
+                </article>
+              </div>
+
+              <blockquote class="pull-quote" data-reveal>
+                “The model can inspect. It cannot wander.”
+              </blockquote>
+            </div>
+
+            <figure class="read-specimen" data-read-demo data-reveal>
+              <div class="file-card">
+                <div class="file-card-head">
+                  <span>workspace / mint</span>
+                  <span class="access access--read">read-only</span>
+                </div>
+
+                <div class="file-tree" aria-label="Workspace file tree">
+                  <div class="tree-row"><span class="tree-icon">▾</span> src</div>
+                  <div class="tree-row tree-row--indent"><span class="tree-icon">▾</span> auth</div>
+                  <div class="tree-row tree-row--indent tree-row--deep tree-row--match">
+                    <span class="tree-icon">·</span> session.ts <span class="tree-hit">42</span>
+                  </div>
+                  <div class="tree-row tree-row--indent tree-row--deep"><span class="tree-icon">·</span> token.ts</div>
+                  <div class="tree-row tree-row--indent"><span class="tree-icon">▸</span> tools</div>
+                  <div class="tree-row"><span class="tree-icon">▸</span> tests</div>
+                  <div class="tree-row"><span class="tree-icon">·</span> README.md</div>
+                  <div class="tree-row tree-row--muted"><span class="tree-icon">·</span> node_modules <span class="tree-badge">ignored</span></div>
+                  <div class="tree-row tree-row--danger"><span class="tree-icon">·</span> .env <span class="tree-badge tree-badge--danger">blocked</span></div>
+                </div>
+
+                <div class="search-demo">
+                  <span class="search-icon" aria-hidden="true">⌕</span>
+                  <span class="search-query">session token</span>
+                  <span class="search-caret" aria-hidden="true"></span>
+                  <span class="search-result">1 result</span>
+                </div>
+
+                <div class="file-preview">
+                  <div class="file-preview-head">
+                    <span>src/auth/session.ts</span>
+                    <span>256 KB max</span>
+                  </div>
+                  <pre><code><span class="code-ln">38</span> export async function <mark>validateSession</mark>(token?: string) {
+<span class="code-ln">39</span>   if (!token) return null;
+<span class="code-ln">40</span>   const row = await db.get(token);
+<span class="code-ln">41</span>   if (!row) return null;
+<span class="code-ln">42</span>   return row.userId;
+<span class="code-ln">43</span> }</code></pre>
+                </div>
+
+                <div class="boundary-alert" data-boundary-alert>
+                  <span class="boundary-icon" aria-hidden="true">✕</span>
+                  <span><code>../../.env</code> — path outside workspace</span>
+                </div>
+              </div>
+
+              <figcaption class="specimen-caption">
+                <span class="specimen-fig">Fig. 02</span>
+                <span>One search, one read, one refusal. Illustrative workspace.</span>
+              </figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- 03 — IT ASKS -->
+      <section id="approve" class="chapter chapter--dark chapter--approve" data-section="approve">
+        <div class="approval-pin" data-approval-pin>
+          <div class="wrap approval-layout">
+            <div class="approval-copy">
+              <header class="chapter-head chapter-head--dark">
+                <p class="chapter-number" data-reveal>03 / THE GATE</p>
+                <h2 data-reveal>The model can ask. <em>Only you can approve.</em></h2>
+                <p class="chapter-kicker" data-reveal>
+                  A diff you didn’t read is just a wish. Every patch and every command waits here.
+                </p>
+              </header>
+
+              <div class="approval-checks" data-approval-checks>
+                <div class="check" data-check data-at="0.3">
+                  <span class="check-box" aria-hidden="true">✓</span>
+                  <div>
+                    <strong>Inside the workspace</strong>
+                    <p>Resolved path and symlink target.</p>
+                  </div>
+                </div>
+                <div class="check" data-check data-at="0.42">
+                  <span class="check-box" aria-hidden="true">✓</span>
+                  <div>
+                    <strong>Not a sensitive file</strong>
+                    <p>Env files, keys, and certificates are refused.</p>
+                  </div>
+                </div>
+                <div class="check" data-check data-at="0.54">
+                  <span class="check-box" aria-hidden="true">✓</span>
+                  <div>
+                    <strong>Unchanged since preview</strong>
+                    <p>The file hash is revalidated before applying.</p>
+                  </div>
+                </div>
+              </div>
+
+              <p class="approval-note" data-reveal>
+                The model cannot type <code>/apply</code>. Neither can the cat.
+              </p>
+            </div>
+
+            <div class="approval-desk" data-approval-desk data-reveal>
+              <div class="diff-card">
+                <div class="diff-head">
+                  <span>workspace_propose_patch</span>
+                  <span class="diff-status" data-diff-status>awaiting approval</span>
+                </div>
+                <div class="diff-file">
+                  <span>src/auth/session.ts</span>
+                  <span>+1 −1</span>
+                </div>
+                <div class="diff-body">
+                  <div class="diff-line diff-line--context" data-diff data-at="0.06">
+                    <span class="diff-ln">40</span>
+                    <code>const row = await db.get(token);</code>
+                  </div>
+                  <div class="diff-line diff-line--remove" data-diff data-at="0.14">
+                    <span class="diff-ln">41</span>
+                    <code><b>-</b> if (!token) return null;</code>
+                  </div>
+                  <div class="diff-line diff-line--add" data-diff data-at="0.22">
+                    <span class="diff-ln">41</span>
+                    <code><b>+</b> if (!token) throw new AuthError("missing token");</code>
+                  </div>
+                  <div class="diff-line diff-line--context" data-diff data-at="0.28">
+                    <span class="diff-ln">42</span>
+                    <code>if (!row) return null;</code>
+                  </div>
+                </div>
+                <div class="diff-foot">
+                  <span class="diff-hash">sha256 · 9f2a…</span>
+                  <span class="diff-note">preview 4 / 240 lines</span>
+                </div>
+              </div>
+
+              <div class="stamp" data-stamp aria-hidden="true">
+                <span class="stamp-main" data-stamp-main>APPROVAL REQUIRED</span>
+                <span class="stamp-sub">user action only</span>
+              </div>
+
+              <button class="keycap" type="button" data-apply aria-describedby="apply-help">
+                <span class="keycap-top">/apply</span>
+                <span class="keycap-label">approve this patch</span>
+              </button>
+              <p id="apply-help" class="approval-help">Press the keycap. No files are changed in this demo.</p>
+
+              <div class="approval-result" data-approval-result aria-live="polite">
+                <span class="approval-result-icon" aria-hidden="true">✓</span>
+                <div>
+                  <strong>Patch written</strong>
+                  <p>Permissions preserved where supported. File hash revalidated.</p>
+                </div>
+                <button class="text-button" type="button" data-reset-approval>reset demo</button>
+              </div>
+            </div>
+          </div>
+
+          <p class="specimen-caption specimen-caption--dark approval-caption">
+            <span class="specimen-fig">Fig. 03</span>
+            <span>Interactive approval desk. Nothing is written to disk.</span>
+          </p>
+        </div>
+
+        <div class="wrap command-section">
+          <div class="command-intro">
+            <p class="chapter-number" data-reveal>03b / COMMANDS</p>
+            <h2 data-reveal>A leash, <em>not a sandbox.</em></h2>
+            <p class="chapter-kicker" data-reveal>
+              The model can propose one executable and its arguments. You inspect the command,
+              directory, and timeout, then type <code>/run</code>. Approval is single-use.
+            </p>
+            <blockquote class="pull-quote pull-quote--dark" data-reveal>
+              “Approved commands can still have side effects. Review every preview.”
+            </blockquote>
+          </div>
+
+          <div class="command-card" data-command-demo data-reveal>
+            <div class="command-head">
+              <span>terminal_propose</span>
+              <span class="access access--approval">approval-required</span>
+            </div>
+
+            <div class="command-body">
+              <div class="command-line">
+                <span class="command-prompt" aria-hidden="true">$</span>
+                <code>bun run typecheck</code>
+              </div>
+
+              <dl class="command-meta">
+                <div><dt>cwd</dt><dd>.</dd></div>
+                <div><dt>timeout</dt><dd>120000 ms</dd></div>
+                <div><dt>approval</dt><dd>/run · single use</dd></div>
+              </dl>
+
+              <div class="chip-row">
+                <span class="chip-label">allowlist</span>
+                <code>bun</code><code>npm</code><code>pnpm</code><code>yarn</code><code>node</code><code>git</code><code>python</code><code>python3</code><code>py</code><code>pytest</code><code>cargo</code><code>go</code><code>dotnet</code>
+              </div>
+
+              <div class="chip-row chip-row--blocked">
+                <span class="chip-label">blocked</span>
+                <code>rm -rf</code><code>bun -e</code><code>a &amp;&amp; b</code><code>&gt; out</code><code>$(cmd)</code>
+              </div>
+
+              <div class="command-actions">
+                <button class="button button--mint" type="button" data-run-command>
+                  /run command <span aria-hidden="true">→</span>
+                </button>
+                <button class="text-button" type="button" data-reset-command hidden>reset demo</button>
+              </div>
+
+              <div class="command-output" data-command-output hidden aria-live="polite">
+                <div class="command-output-head">
+                  <span>exit 0 · 3.2s</span>
+                  <span>scripted output</span>
+                </div>
+                <pre><code>$ bun run typecheck
+tsc --noEmit
+✓ 0 errors
+output capped at 24,000 characters</code></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 04 — IT REMEMBERS -->
+      <section id="remember" class="chapter chapter--paper chapter--remember" data-section="remember">
+        <div class="wrap">
+          <header class="chapter-head chapter-head--split">
+            <div>
+              <p class="chapter-number" data-reveal>04 / IT REMEMBERS</p>
+              <h2 data-reveal>Sessions with <em>a memory.</em></h2>
+            </div>
+            <p class="chapter-kicker" data-reveal>
+              Created lazily on the first message. Each session remembers its own model.
+            </p>
+          </header>
+
+          <div class="session-grid">
+            <div class="session-copy">
+              <p class="drop-line" data-reveal>
+                Conversation history lives in SQLite at <code>~/.mint/mint.sqlite</code>, or under
+                <code>MINT_DATA_DIR</code>. Resume a session, rename it, delete it. The database
+                stays on your machine.
+              </p>
+
+              <div class="session-facts">
+                <div data-reveal><span>01</span><p>Per-session model selection, restored on resume.</p></div>
+                <div data-reveal><span>02</span><p>Restrictive directory and file permissions where supported.</p></div>
+                <div data-reveal><span>03</span><p>Session history stays in SQLite on your machine.</p></div>
+              </div>
+
+              <div class="sqlite-snippet" data-reveal>
+                <span class="sqlite-prompt">sqlite&gt;</span>
+                <code>select id, title, model from sessions;</code>
+              </div>
+            </div>
+
+            <div class="session-stack" data-session-stack data-reveal>
+              <article class="session-card session-card--back">
+                <div class="session-card-top"><span>#02</span><span>meta/llama-3.1-70b-instruct</span></div>
+                <h3>typecheck loop</h3>
+                <p>9 messages · last opened yesterday</p>
+                <button class="session-resume" type="button" data-resume-session>resume →</button>
+              </article>
+
+              <article class="session-card session-card--mid">
+                <div class="session-card-top"><span>#03</span><span>nvidia/nemotron-4-340b-instruct</span></div>
+                <h3>cat unlock audit</h3>
+                <p>6 messages · last opened 3h ago</p>
+                <button class="session-resume" type="button" data-resume-session>resume →</button>
+              </article>
+
+              <article class="session-card session-card--front">
+                <div class="session-card-top"><span>#04</span><span class="session-active"><i></i> active</span></div>
+                <h3>auth patch review</h3>
+                <p>14 messages · model restored</p>
+                <button class="session-resume" type="button" data-resume-session>resume →</button>
+              </article>
+            </div>
+          </div>
+
+          <p class="specimen-caption">
+            <span class="specimen-fig">Fig. 04</span>
+            <span>Illustrative session data. The real store is local SQLite.</span>
+          </p>
+        </div>
+      </section>
+
+      <!-- 05 — IT PURRS -->
+      <section id="cat" class="chapter chapter--paper chapter--cat" data-section="cat">
+        <div class="wrap">
+          <header class="chapter-head chapter-head--split">
+            <div>
+              <p class="chapter-number" data-reveal>05 / IT PURRS</p>
+              <h2 data-reveal>The cat has <em>no permissions.</em></h2>
+            </div>
+            <p class="chapter-kicker" data-reveal>
+              The cat is cosmetic. The approval gate is not.
+            </p>
+          </header>
+
+          <div class="cat-grid">
+            <div class="cat-copy">
+              <p class="drop-line" data-reveal>
+                MINT’s cat is a real portrait, drawn in code at 192 × 192 with 2× supersampling.
+                Six expressions. Twelve frames. Mood overlays for thinking, errors, sleepiness,
+                and curiosity. In the terminal it uses Kitty graphics, Sixel, or truecolor
+                quadrant blocks. Here, the same renderer runs on canvas.
+              </p>
+
+              <div class="cat-facts">
+                <div data-reveal><strong>06</strong><span>expressions</span></div>
+                <div data-reveal><strong>12</strong><span>frames</span></div>
+                <div data-reveal><strong>0</strong><span>network calls</span></div>
+              </div>
+
+              <p class="cat-quote" data-reveal>
+                “The cat accepts your affection. A rare honor.”
+              </p>
+
+              <p class="cat-note" data-reveal>
+                Pet and feed it here. Unlocks persist in your browser. The real harness stores
+                them in SQLite.
+              </p>
+            </div>
+
+            <div class="cat-stage-wrap" data-reveal>
+              <div class="cat-stage">
+                <div class="cat-stage-head">
+                  <span>FELIS TERMINALIS</span>
+                  <span>192 × 192</span>
+                </div>
+
+                <div class="cat-canvas-wrap">
+                  <span class="cat-tick cat-tick--tl" aria-hidden="true"></span>
+                  <span class="cat-tick cat-tick--tr" aria-hidden="true"></span>
+                  <span class="cat-tick cat-tick--bl" aria-hidden="true"></span>
+                  <span class="cat-tick cat-tick--br" aria-hidden="true"></span>
+                  <canvas
+                    class="cat-canvas"
+                    data-cat-stage
+                    width="192"
+                    height="192"
+                    role="img"
+                    aria-label="Pixel art portrait of MINT the cat. Use the expression controls below to change its face."
+                  >
+                    Pixel art portrait of MINT the cat.
+                  </canvas>
+                </div>
+
+                <div class="cat-stage-foot">
+                  <span>frame <b data-cat-frame>00</b> / 12</span>
+                  <span>kitty · sixel · quadrants</span>
+                </div>
+              </div>
+
+              <div class="cat-controls">
+                <div
+                  class="cat-expression-list"
+                  role="radiogroup"
+                  aria-label="Cat expression"
+                  data-expression-list
+                ></div>
+
+                <div class="cat-actions">
+                  <button class="cat-action" type="button" data-pet>
+                    <span>pet</span><b data-pet-count>0</b>
+                  </button>
+                  <button class="cat-action" type="button" data-feed>
+                    <span>feed</span><b data-feed-count>0</b>
+                  </button>
+                  <label class="switch">
+                    <input type="checkbox" data-cat-animate checked />
+                    <span>animate</span>
+                  </label>
+                </div>
+
+                <div class="cat-controls-foot">
+                  <p class="cat-unlock" data-cat-unlock>Heart eyes unlock at 3 pets.</p>
+                  <div class="cat-text-actions">
+                    <button class="text-button" type="button" data-unlock-all>unlock all (demo)</button>
+                    <button class="text-button" type="button" data-reset-cat>reset</button>
+                  </div>
+                </div>
+
+                <p class="cat-toast" data-cat-toast role="status" aria-live="polite"></p>
+              </div>
+            </div>
+          </div>
+
+          <p class="specimen-caption">
+            <span class="specimen-fig">Fig. 05</span>
+            <span>Runs entirely in your browser. The cat makes no network calls.</span>
+          </p>
+        </div>
+      </section>
+
+      <!-- 06 — IT HAS LIMITS -->
+      <section id="limits" class="chapter chapter--paper chapter--limits" data-section="limits">
+        <div class="wrap">
+          <header class="chapter-head chapter-head--split">
+            <div>
+              <p class="chapter-number" data-reveal>06 / IT HAS LIMITS</p>
+              <h2 data-reveal>A leash, <em>not a sandbox.</em></h2>
+            </div>
+            <p class="chapter-kicker" data-reveal>
+              No browsing. No external apps. No sandbox claims. A short, honest ledger.
+            </p>
+          </header>
+
+          <div class="limits-grid">
+            <article class="ledger ledger--works" data-reveal>
+              <h3><span class="ledger-dot ledger-dot--mint"></span> Works today</h3>
+              <ul>
+                <li>NVIDIA NIM streaming</li>
+                <li>SQLite sessions and resume</li>
+                <li>Workspace list, read, and search</li>
+                <li>Project context discovery</li>
+                <li>Patch and full-file proposals</li>
+                <li>Approval-gated terminal commands</li>
+                <li>Persistent pixel cat</li>
+              </ul>
+            </article>
+
+            <article class="ledger ledger--next" data-reveal>
+              <h3><span class="ledger-dot ledger-dot--peach"></span> Not yet</h3>
+              <ul>
+                <li>Web browsing</li>
+                <li>External app control</li>
+                <li>OS credential-store integration</li>
+                <li>Multi-step task planning</li>
+                <li>Searchable session history</li>
+                <li>Session export and import</li>
+                <li>Context compaction</li>
+                <li>Production packaging</li>
+              </ul>
+            </article>
+
+            <article class="ledger ledger--never" data-reveal>
+              <h3><span class="ledger-dot ledger-dot--red"></span> Not a sandbox</h3>
+              <p>
+                Approved commands can still perform consequential operations. The allowlist,
+                blocked-argument checks, timeout, and output cap are a safety layer — not a
+                sandbox. Inspect every preview.
+              </p>
+              <p class="ledger-small">
+                MINT never claims a file was read, a command ran, or a site was browsed unless a
+                tool result confirms it.
+              </p>
+            </article>
+          </div>
+
+          <div class="bounds-strip" data-reveal>
+            <div><strong>12</strong><span>tool rounds</span></div>
+            <div><strong>24</strong><span>tool calls per turn</span></div>
+            <div><strong>120s</strong><span>command timeout</span></div>
+            <div><strong>24k</strong><span>output cap</span></div>
+          </div>
+
+          <p class="specimen-caption">
+            <span class="specimen-fig">Fig. 06</span>
+            <span>Current milestone: interactive MINT harness. Web browsing is not implemented.</span>
+          </p>
+        </div>
+      </section>
+
+      <!-- 07 — INSTALL -->
+      <section id="install" class="chapter chapter--paper chapter--install" data-section="install">
+        <div class="wrap install-grid">
+          <div class="install-copy">
+            <header class="chapter-head">
+              <p class="chapter-number" data-reveal>07 / INSTALL</p>
+              <h2 data-reveal>Take it <em>for a walk.</em></h2>
+              <p class="chapter-kicker" data-reveal>
+                Bun 1.3.14+, an NVIDIA API key, and a terminal that can hold a cat.
+              </p>
+            </header>
+
+            <ul class="requirements" data-reveal>
+              <li><span>01</span> Bun 1.3.14 or newer</li>
+              <li><span>02</span> An NVIDIA API key with access to a hosted model</li>
+              <li><span>03</span> Linux x64, macOS, or Windows x64 / WSL</li>
+            </ul>
+
+            <p class="install-note" data-reveal>
+              Your key stays in <code>.env</code>. MINT never writes it to chat history, logs, or
+              SQLite.
+            </p>
+          </div>
+
+          <div class="install-card" data-install-card data-reveal>
+            <div class="install-tabs" role="tablist" aria-label="Install shell">
+              <button
+                class="install-tab is-active"
+                type="button"
+                role="tab"
+                aria-selected="true"
+                aria-controls="install-powershell"
+                id="tab-powershell"
+                data-install-tab="powershell"
+              >
+                PowerShell
+              </button>
+              <button
+                class="install-tab"
+                type="button"
+                role="tab"
+                aria-selected="false"
+                aria-controls="install-bash"
+                id="tab-bash"
+                data-install-tab="bash"
+              >
+                Bash
+              </button>
+            </div>
+
+            <div
+              class="install-panel is-active"
+              role="tabpanel"
+              id="install-powershell"
+              aria-labelledby="tab-powershell"
+              data-install-panel="powershell"
+            >
+              <pre><code>git clone https://github.com/VishruthC/mint-harness.git
+cd mint-harness
+bun install
+Copy-Item .env.example .env
+notepad .env
+bun run dev</code></pre>
+            </div>
+
+            <div
+              class="install-panel"
+              role="tabpanel"
+              id="install-bash"
+              aria-labelledby="tab-bash"
+              data-install-panel="bash"
+              hidden
+            >
+              <pre><code>git clone https://github.com/VishruthC/mint-harness.git
+cd mint-harness
+bun install
+cp .env.example .env
+$EDITOR .env
+bun run dev</code></pre>
+            </div>
+
+            <div class="install-card-foot">
+              <span>set <code>NVIDIA_API_KEY</code> in .env</span>
+              <button class="copy-button" type="button" data-copy-install>copy</button>
+            </div>
+
+            <div class="install-links">
+              <a href="https://github.com/VishruthC/mint-harness" target="_blank" rel="noreferrer">Source ↗</a>
+              <a href="https://github.com/VishruthC/mint-harness#readme" target="_blank" rel="noreferrer">README ↗</a>
+              <a href="https://github.com/VishruthC/mint-harness/blob/main/docs/ROADMAP.md" target="_blank" rel="noreferrer">Roadmap ↗</a>
+              <a href="https://github.com/VishruthC/mint-harness/blob/main/LICENSE" target="_blank" rel="noreferrer">License ↗</a>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap">
+        <div class="footer-wordmark" aria-hidden="true"><span>✿</span> MINT</div>
+
+        <div class="footer-grid">
+          <div class="footer-brand">
+            <p>
+              A small harness with sharp little claws. Built with Bun, OpenTUI, SolidJS, and
+              NVIDIA NIM. It reads carefully, asks first, and purrs.
+            </p>
+            <p class="footer-status"><span class="status-dot"></span> v0.1.0 · in development</p>
+          </div>
+
+          <nav class="footer-nav" aria-label="Project links">
+            <p class="footer-label">PROJECT</p>
+            <a href="https://github.com/VishruthC/mint-harness" target="_blank" rel="noreferrer">GitHub ↗</a>
+            <a href="https://github.com/VishruthC/mint-harness#readme" target="_blank" rel="noreferrer">README ↗</a>
+            <a href="https://github.com/VishruthC/mint-harness/blob/main/docs/ROADMAP.md" target="_blank" rel="noreferrer">Roadmap ↗</a>
+            <a href="https://github.com/VishruthC/mint-harness/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT License ↗</a>
+          </nav>
+
+          <nav class="footer-nav" aria-label="Elsewhere">
+            <p class="footer-label">ELSEWHERE</p>
+            <a href="https://github.com/VishruthC" target="_blank" rel="noreferrer">VishruthC ↗</a>
+            <a href="#top">Back to top ↑</a>
+          </nav>
+
+          <div class="footer-meta">
+            <p class="footer-label">COLOPHON</p>
+            <p>Set in Newsreader, Victor Mono, and Departure Mono.</p>
+            <p>Paper, ink, and one canvas cat.</p>
+            <p>No analytics. No cookies.</p>
+          </div>
+        </div>
+
+        <div class="footer-bottom">
+          <p>
+            Independent project. Not affiliated with NVIDIA. NVIDIA NIM is a trademark of NVIDIA
+            Corporation.
+          </p>
+          <p>Made by <a href="https://github.com/VishruthC" target="_blank" rel="noreferrer">VishruthC</a>. MIT licensed.</p>
+        </div>
+      </div>
+    </footer>
+
+    <dialog class="index-dialog" data-index-dialog aria-labelledby="index-title">
+      <div class="index-dialog-inner">
+        <div class="index-head">
+          <div>
+            <p class="eyebrow">MINT / INDEX</p>
+            <h2 id="index-title">Jump to a chapter.</h2>
+          </div>
+          <button class="index-close" type="button" data-index-close aria-label="Close index">✕</button>
+        </div>
+
+        <label class="index-search">
+          <span aria-hidden="true">⌕</span>
+          <input
+            type="search"
+            placeholder="Chapter, command, or action…"
+            aria-label="Search chapters"
+            data-index-search
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </label>
+
+        <div class="index-list" data-index-list>
+          <a href="#top" data-index-item data-keywords="top hero start intro">
+            <span class="index-num">00</span>
+            <span class="index-text"><strong>Top</strong><em>The small harness with sharp little claws</em></span>
+            <span class="index-arrow">→</span>
+          </a>
+          <a href="#loop" data-index-item data-keywords="loop how it works registry nvidia nim tools">
+            <span class="index-num">01</span>
+            <span class="index-text"><strong>The loop</strong><em>One turn, end to end</em></span>
+            <span class="index-arrow">→</span>
+          </a>
+          <a href="#read" data-index-item data-keywords="read workspace files search gitignore sensitive boundary">
+            <span class="index-num">02</span>
+            <span class="index-text"><strong>It reads</strong><em>Bounded workspace tools</em></span>
+            <span class="index-arrow">→</span>
+          </a>
+          <a href="#approve" data-index-item data-keywords="approve apply run diff patch terminal command gate">
+            <span class="index-num">03</span>
+            <span class="index-text"><strong>The gate</strong><em>Approval for edits and commands</em></span>
+            <span class="index-arrow">→</span>
+          </a>
+          <a href="#remember" data-index-item data-keywords="remember sessions sqlite resume model">
+            <span class="index-num">04</span>
+            <span class="index-text"><strong>It remembers</strong><em>SQLite sessions and models</em></span>
+            <span class="index-arrow">→</span>
+          </a>
+          <a href="#cat" data-index-item data-keywords="cat pet feed expressions wizard chaos zoomies">
+            <span class="index-num">05</span>
+            <span class="index-text"><strong>It purrs</strong><em>The cat with no permissions</em></span>
+            <span class="index-arrow">→</span>
+          </a>
+          <a href="#limits" data-index-item data-keywords="limits sandbox roadmap not yet web browsing">
+            <span class="index-num">06</span>
+            <span class="index-text"><strong>Limits</strong><em>A leash, not a sandbox</em></span>
+            <span class="index-arrow">→</span>
+          </a>
+          <a href="#install" data-index-item data-keywords="install bun nvidia api key clone run">
+            <span class="index-num">07</span>
+            <span class="index-text"><strong>Install</strong><em>Take it for a walk</em></span>
+            <span class="index-arrow">→</span>
+          </a>
+          <a
+            href="https://github.com/VishruthC/mint-harness"
+            target="_blank"
+            rel="noreferrer"
+            data-index-item
+            data-keywords="github source code repository"
+          >
+            <span class="index-num">↗</span>
+            <span class="index-text"><strong>Source on GitHub</strong><em>VishruthC/mint-harness</em></span>
+            <span class="index-arrow">↗</span>
+          </a>
+        </div>
+
+        <p class="index-hint">↑↓ navigate · Enter open · Esc close</p>
+      </div>
+    </dialog>
+
+    <div class="toast" data-toast role="status" aria-live="polite"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

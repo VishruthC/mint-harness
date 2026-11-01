@@ -1,0 +1,63 @@
+@font-face {
+  font-family: "Departure Mono";
+  src: url("../assets/fonts/DepartureMono-Regular.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+:root {
+  /* Paper */
+  --paper: #f3eee5;
+  --paper-deep: #eae2d5;
+  --paper-light: #faf7f0;
+  --ink: #1a1822;
+  --ink-soft: #2a2733;
+  --muted: #6e6878;
+  --rule: #d8d0c4;
+  --rule-strong: #bdb3a5;
+
+  /* Accents on paper */
+  --mint: #2b7554;
+  --mint-deep: #1f5c42;
+  --mint-wash: #dcebdd;
+  --pink: #c9649a;
+  --pink-wash: #f3dce7;
+  --lavender: #6f5fa8;
+  --peach: #b96532;
+  --red: #b23a54;
+  --red-wash: #f0d7dc;
+
+  /* Catppuccin Mocha exhibits */
+  --terminal: #1e1e2e;
+  --terminal-panel: #242438;
+  --terminal-raised: #2a2a40;
+  --terminal-text: #cdd6f4;
+  --terminal-muted: #9399b2;
+  --terminal-mint: #a6e3a1;
+  --terminal-pink: #f5c2e7;
+  --terminal-lavender: #cba6f7;
+  --terminal-peach: #fab387;
+  --terminal-red: #f38ba8;
+  --terminal-cream: #ffebcd;
+  --terminal-rule: rgba(205, 214, 244, 0.14);
+
+  /* Type */
+  --font-serif: "Newsreader Variable", Newsreader, Georgia, "Times New Roman", serif;
+  --font-mono: "Victor Mono", ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --font-pixel: "Departure Mono", "Victor Mono", monospace;
+
+  /* Layout */
+  --wrap: 1440px;
+  --gutter: clamp(20px, 4vw, 64px);
+  --grid-gap: 24px;
+  --header-h: 68px;
+  --radius: 2px;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 180ms;
+  --dur: 420ms;
+  --dur-slow: 800ms;
+}

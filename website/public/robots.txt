@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://vishruthc.github.io/mint-harness/sitemap.xml

@@ -1,0 +1,283 @@
+/* ── Reveal system ────────────────────────────────────────── */
+
+html.motion [data-reveal] {
+  opacity: 0;
+  transform: translateY(22px);
+  transition:
+    opacity 760ms var(--ease-out),
+    transform 760ms var(--ease-out);
+}
+
+html.motion [data-reveal].is-in {
+  opacity: 1;
+  transform: none;
+}
+
+/* Stagger a few tight editorial groups without needing per-item JS. */
+html.motion .note-list .note:nth-child(2),
+html.motion .session-facts div:nth-child(2) {
+  transition-delay: 60ms;
+}
+
+html.motion .note-list .note:nth-child(3),
+html.motion .session-facts div:nth-child(3) {
+  transition-delay: 120ms;
+}
+
+html.motion .note-list .note:nth-child(4) {
+  transition-delay: 180ms;
+}
+
+/* ── Hero ─────────────────────────────────────────────────── */
+
+html.motion .hero-title .line > span {
+  transform: translateY(112%);
+  transition: transform 1100ms var(--ease-out);
+}
+
+html.motion .hero-title .line:nth-child(2) > span {
+  transition-delay: 90ms;
+}
+
+html.motion .hero-title .line:nth-child(3) > span {
+  transition-delay: 180ms;
+}
+
+html.motion .hero.is-ready .hero-title .line > span {
+  transform: translateY(0);
+}
+
+html.motion .hero-specimen {
+  transition-delay: 140ms;
+}
+
+html.motion .tui-line {
+  opacity: 0;
+  transform: translateY(5px);
+}
+
+html.motion .tui-line.is-visible {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 320ms var(--ease-out),
+    transform 320ms var(--ease-out);
+}
+
+html.motion .tui-input-text {
+  opacity: 0;
+}
+
+html.motion .tui-input-text.is-visible {
+  opacity: 1;
+}
+
+/* ── Loop scene ───────────────────────────────────────────── */
+
+html.motion .loop-pulse {
+  opacity: 0;
+}
+
+html.motion .loop-pulse.is-live {
+  opacity: 1;
+}
+
+.loop-node.is-past {
+  opacity: 0.74;
+}
+
+.loop-node.is-past rect {
+  stroke: rgba(166, 227, 161, 0.42);
+}
+
+.loop-node--gate.is-waiting rect {
+  animation: gate-breathe 1.8s ease-in-out infinite;
+}
+
+@keyframes gate-breathe {
+  0%,
+  100% {
+    stroke-opacity: 1;
+  }
+  50% {
+    stroke-opacity: 0.42;
+  }
+}
+
+/* ── Read scene ───────────────────────────────────────────── */
+
+html.motion .boundary-alert {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+html.motion .boundary-alert.is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+/* ── Approval scene ───────────────────────────────────────── */
+
+html.motion .check {
+  opacity: 0.16;
+}
+
+html.motion .check.is-checked {
+  opacity: 1;
+}
+
+html.motion [data-diff] {
+  opacity: 0.2;
+}
+
+html.motion [data-diff].is-visible {
+  opacity: 1;
+}
+
+html.motion .stamp {
+  opacity: 0;
+}
+
+html.motion .stamp.is-visible {
+  opacity: 1;
+}
+
+html.motion .keycap {
+  opacity: 0.72;
+  transform: translateY(3px);
+}
+
+html.motion .approval-desk.is-armed .keycap {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Command demo ─────────────────────────────────────────── */
+
+html.motion .command-output:not([hidden]) {
+  animation: output-in 360ms var(--ease-out) both;
+}
+
+@keyframes output-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.command-output pre {
+  max-height: 280px;
+  overflow: auto;
+}
+
+/* ── Cat stage ────────────────────────────────────────────── */
+
+.cat-canvas {
+  image-rendering: auto;
+}
+
+.cat-stage-wrap .cat-toast:empty {
+  display: none;
+}
+
+/* ── Index dialog ─────────────────────────────────────────── */
+
+html.has-dialog {
+  overflow: hidden;
+}
+
+.index-empty {
+  padding: 22px 6px;
+  border-bottom: 1px solid var(--rule);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.index-list [hidden] {
+  display: none;
+}
+
+/* ── Pin spacing ──────────────────────────────────────────── */
+
+@media (min-width: 1000px) and (min-height: 700px) and (prefers-reduced-motion: no-preference) {
+  .chapter--loop {
+    padding-block: 0;
+  }
+
+  .chapter--approve {
+    padding-top: 0;
+  }
+}
+
+/* ── Reduced motion ───────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  html.motion [data-reveal],
+  html.motion [data-reveal].is-in {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  html.motion .hero-title .line > span,
+  html.motion .tui-line,
+  html.motion .tui-input-text,
+  html.motion .check,
+  html.motion [data-diff],
+  html.motion .boundary-alert {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  html.motion .stamp,
+  html.motion .stamp.is-visible {
+    opacity: 1;
+    transform: rotate(-6deg) scale(1);
+    transition: none;
+  }
+
+  html.motion .keycap {
+    opacity: 1;
+    transform: none;
+  }
+
+  html.motion .loop-pulse {
+    display: none;
+  }
+
+  .status-dot,
+  .tui-caret,
+  .search-caret,
+  .loop-node--gate.is-waiting rect,
+  .cat-heart {
+    animation: none !important;
+  }
+
+  .cat-heart {
+    display: none;
+  }
+
+  .index-dialog[open],
+  html.motion .command-output:not([hidden]) {
+    animation: none;
+  }
+
+  .session-card,
+  .session-card--front:hover,
+  .session-card--front:focus-within {
+    transition: none;
+  }
+}
+
+/* ── Utility: scroll anchors below the fixed header ───────── */
+
+[id] {
+  scroll-margin-top: calc(var(--header-h) + 20px);
+}

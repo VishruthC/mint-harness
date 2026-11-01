@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { CAT_EXPRESSIONS, catSprite, feedCat, petCat, selectCatExpression } from "../src/cat";
+import { CAT_EXPRESSIONS, feedCat, petCat, selectCatExpression } from "../src/cat";
 import type { CatProfile } from "../src/storage";
 
 const freshProfile = (): CatProfile => ({ pets: 0, treats: 0, selectedExpression: "idle", animationsEnabled: true, unlockedExpressions: ["idle", "happy"] });
 
-describe("MINT ASCII cat", () => {
+describe("MINT cat profile & expressions", () => {
   test("petting persists count and unlocks heart eyes after three pets", () => {
     let profile = freshProfile();
     profile = petCat(profile).profile;
@@ -40,11 +40,8 @@ describe("MINT ASCII cat", () => {
     expect(selectCatExpression(profile, "happy").selectedExpression).toBe("happy");
   });
 
-  test("ASCII sprite has a compact three-line shape, uses plain ASCII, and expression IDs are unique", () => {
-    const sprite = catSprite("idle", 0, "idle");
-    expect(sprite).toHaveLength(3);
-    expect(sprite.join("\n")).toMatch(/\( o\.o \)/);
-    expect(sprite.join("\n")).toMatch(/^[\x00-\x7F\n]*$/);
-    expect(new Set(CAT_EXPRESSIONS.map((expression) => expression.id)).size).toBe(CAT_EXPRESSIONS.length);
+  test("expression IDs are unique", () => {
+    const ids = CAT_EXPRESSIONS.map((expression) => expression.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

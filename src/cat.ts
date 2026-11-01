@@ -40,16 +40,9 @@ export function selectCatExpression(profile: CatProfile, expressionId: string): 
   return { ...profile, selectedExpression: expressionId };
 }
 
-export function catSprite(expression: string, _frame = 0, mood: CatMood = "idle"): string[] {
-  // Minimal three-line ASCII cat; keep it readable in narrow terminal sidebars.
-  const face = expression === "love" ? "<3" : expression === "wizard" ? "o.*" : expression === "chaos" ? "x.x" : expression === "zoomies" ? "O.O" : mood === "happy" ? "^.^" : mood === "error" ? "x_x" : mood === "sleepy" ? "-.-" : mood === "thinking" ? "o.O" : "o.o";
-  return [
-    " /\_/\\",
-    `( ${face.padEnd(3, " ").slice(0, 3)} )`,
-    " > ^ <",
-  ];
-}
-
 export function catProfileSummary(profile: CatProfile): string {
   return `Pets: ${profile.pets} · Treats: ${profile.treats} · Expressions: ${profile.unlockedExpressions.length}/${CAT_EXPRESSIONS.length} · Animations: ${profile.animationsEnabled ? "on" : "off"}`;
 }
+
+/** Expression IDs for type safety */
+export type CatExpressionId = typeof CAT_EXPRESSIONS[number]["id"];

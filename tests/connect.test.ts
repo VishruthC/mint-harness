@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   sanitizePastedText,
   insertAtCursor,
+  deleteBeforeCursor,
+  deleteAtCursor,
   normalizeApiKey,
   validateConnectDraft,
   maskSecret,
@@ -93,6 +95,99 @@ describe("connect helpers", () => {
       expect(value).toBe("🌎🌍");
       // Emojis are 2 UTF-16 code units in JS
       expect(cursor).toBe(2);
+    });
+  });
+
+  describe("deleteBeforeCursor (backspace)", () => {
+    test("deletes character before cursor", () => {
+      const { value, cursor } = deleteBeforeCursor("hello", 3);
+      expect(value).toBe("helo");
+      expect(cursor).toBe(2);
+    });
+
+    test("at beginning does nothing", () => {
+      const { value, cursor } = deleteBeforeCursor("hello", 0);
+      expect(value).toBe("hello");
+      expect(cursor).toBe(0);
+    });
+
+    test("at end deletes last character", () => {
+      const { value, cursor } = deleteBeforeCursor("hello", 5);
+      expect(value).toBe("hell");
+      expect(cursor).toBe(4);
+    });
+
+    test("clamps cursor to valid range", () => {
+      const { value, cursor } = deleteBeforeCursor("hi", 10);
+      expect(value).toBe("h");
+      expect(cursor).toBe(1);
+    });
+
+    test("handles negative cursor", () => {
+      const { value, cursor } = deleteBeforeCursor("hi", -5);
+      expect(value).toBe("hi");
+      expect(cursor).toBe(0);
+    });
+
+    test("handles unicode correctly", () => {
+      // Emojis are surrogate pairs (2 UTF-16 code units each)
+      // "🌍🌎" = \ud83c\udf0d \ud83c\udf0e, length 4 in JS
+      // cursor=2 is between the two emojis, deleting the second code unit of first emoji
+      const { value, cursor } = deleteBeforeCursor("🌍🌎", 2);
+      expect(value).toBe("\ud83c🌎"); // Second code unit of first emoji removed
+      expect(cursor).toBe(1);
+    });
+
+    test("empty string", () => {
+      const { value, cursor } = deleteBeforeCursor("", 0);
+      expect(value).toBe("");
+      expect(cursor).toBe(0);
+    });
+  });
+
+  describe("deleteAtCursor (delete key)", () => {
+    test("deletes character at cursor", () => {
+      const { value, cursor } = deleteAtCursor("hello", 1);
+      expect(value).toBe("hllo");
+      expect(cursor).toBe(1);
+    });
+
+    test("at end does nothing", () => {
+      const { value, cursor } = deleteAtCursor("hello", 5);
+      expect(value).toBe("hello");
+      expect(cursor).toBe(5);
+    });
+
+    test("at beginning deletes first character", () => {
+      const { value, cursor } = deleteAtCursor("hello", 0);
+      expect(value).toBe("ello");
+      expect(cursor).toBe(0);
+    });
+
+    test("clamps cursor to valid range", () => {
+      const { value, cursor } = deleteAtCursor("hi", 10);
+      expect(value).toBe("hi");
+      expect(cursor).toBe(2);
+    });
+
+    test("handles negative cursor", () => {
+      const { value, cursor } = deleteAtCursor("hi", -5);
+      expect(value).toBe("i");
+      expect(cursor).toBe(0);
+    });
+
+    test("handles unicode correctly", () => {
+      // Emojis are surrogate pairs (2 UTF-16 code units each)
+      // "🌍🌎" = \ud83c\udf0d \ud83c\udf0e, cursor=0 deletes first code unit
+      const { value, cursor } = deleteAtCursor("🌍🌎", 0);
+      expect(value).toBe("\udf0d🌎"); // First code unit of first emoji removed
+      expect(cursor).toBe(0);
+    });
+
+    test("empty string", () => {
+      const { value, cursor } = deleteAtCursor("", 0);
+      expect(value).toBe("");
+      expect(cursor).toBe(0);
     });
   });
 
