@@ -12,7 +12,7 @@
   background: var(--terminal);
   color: var(--terminal-text);
   box-shadow: 14px 14px 0 rgba(26, 24, 34, 0.1);
-  font-family: var(--font-mono);
+  font-family: ui-monospace, "Cascadia Mono", "Consolas", "Menlo", "Monaco", "Liberation Mono", monospace;
 }
 
 .tui-top {
@@ -94,7 +94,7 @@
 
 .tui-cat-title {
   color: var(--terminal-pink);
-  font-family: var(--font-mono);
+  font-family: inherit;
   font-size: 9.5px;
   line-height: 1.4;
   letter-spacing: 0.08em;
