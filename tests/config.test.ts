@@ -21,6 +21,7 @@ describe("loadConfig", () => {
     expect(config.apiKey).toBe("test-key");
     expect(config.maxToolRounds).toBe(12);
     expect(config.maxToolCallsPerTurn).toBe(24);
+    expect(config.effort).toBe("max");
   });
 
   test("accepts configured positive integer agent limits", () => {
@@ -43,6 +44,17 @@ describe("loadConfig", () => {
     });
     expect(config.baseUrl).toBe("https://integrate.api.nvidia.com/v1");
   });
+
+  test("accepts valid effort values", () => {
+    for (const effort of ["low", "medium", "high", "max"] as const) {
+      const config = loadConfig({ NVIDIA_API_KEY: "test-key", MINT_EFFORT: effort });
+      expect(config.effort).toBe(effort);
+    }
+  });
+
+  test("rejects invalid effort values", () => {
+    expect(() => loadConfig({ NVIDIA_API_KEY: "test-key", MINT_EFFORT: "invalid" })).toThrow();
+  });
 });
 
 describe("writeDotEnv", () => {
@@ -55,6 +67,7 @@ describe("writeDotEnv", () => {
       preferredModel: "meta/llama-3.3-70b",
       maxToolRounds: 10,
       maxToolCallsPerTurn: 20,
+      effort: "max",
     };
     writeDotEnv(config, envPath);
     const content = readFileSync(envPath, "utf8");
@@ -76,6 +89,7 @@ describe("writeDotEnv", () => {
       preferredModel: "",
       maxToolRounds: 12,
       maxToolCallsPerTurn: 24,
+      effort: "max",
     };
     writeDotEnv(config, envPath);
     const content = readFileSync(envPath, "utf8");
@@ -94,6 +108,7 @@ describe("writeDotEnv", () => {
       preferredModel: 'model"with"quotes',
       maxToolRounds: 12,
       maxToolCallsPerTurn: 24,
+      effort: "max",
     };
     writeDotEnv(config, envPath);
     const content = readFileSync(envPath, "utf8");

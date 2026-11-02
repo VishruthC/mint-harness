@@ -198,9 +198,11 @@ MINT features a fully animated, anti-aliased cat portrait rendered as a real ima
 
 The same character appears in the workspace sidebar and the `/cat` modal. Six expressions (idle, happy, love, zoomies, wizard, chaos) plus mood overlays (thinking, error, sleepy, curious) change the cat's face, posture, and effects. Idle animations include blinking, tail sway, breathing, ear twitches, floating hearts, sparkles, and Z's — all toggleable.
 
+The sidebar portrait scales with terminal size (24×12 → 32×16 → 40×20 cells) inside a specimen frame. The input area is borderless, with a single hairline above the prompt and a metadata line below it: `Plan · <model> · <effort>` (mode, prettified model name, and effort level). Directly below it, a compact footer line shows the workspace path and git branch, with the current session's cumulative token usage on the right. Token counts come from the provider's streamed usage report and are stored per session, so they survive restarts and resume.
+
 - `/pet` — pet MINT and increment the persistent pet counter.
 - `/feed` — give MINT a virtual treat.
 - `/expressions` — list expressions and unlock requirements.
 - `/expression <id>` — equip an unlocked expression (`idle`, `happy`, `love`, `zoomies`, `wizard`, or `chaos`).
 
-Heart eyes unlock after 3 pets; zoomies after 3 treats; the tiny wizard after 8 pets and 5 treats; and chaos gremlin after 15 pets and 10 treats. Pet/treat counts, unlocked expressions, the selected expression, and the animation preference are stored in MINT's SQLite database at `~/.mint/mint.sqlite` (or under `MINT_DATA_DIR`). The cat reacts to thinking, successful completion, errors, and approved command results. All rewards are cosmetic and local; there are no purchases or network calls for cat interactions. No external image assets or API keys are required — the portrait is generated entirely in memory.
+**Effort level** — set `MINT_EFFORT` in `.env` (`low`, `medium`, `high`, `max`; default `max`). This is displayed in the input box metadata line and passed as a hint to the model where supported. No external image assets or API keys are required for the cat; the portrait is generated entirely in memory.

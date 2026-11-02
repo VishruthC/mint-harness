@@ -5,10 +5,6 @@ import {
   frameDiff,
   CAT_ART_SIZE,
   CAT_ART_FRAMES,
-  renderRunCatFrame,
-  renderAllRunCatFrames,
-  RUN_CAT_SIZE,
-  RUN_CAT_FRAMES,
   type CatExpression,
   type CatMood,
 } from "../src/cat-art";
@@ -186,47 +182,3 @@ describe("MINT cat art renderer", () => {
   });
 });
 
-describe("MINT run cat (status indicator)", () => {
-  test("default size buffer has correct dimensions", () => {
-    const frame = renderRunCatFrame(0);
-    expect(frame.length).toBe(RUN_CAT_SIZE * RUN_CAT_SIZE * 4);
-  });
-
-  test("all run frames are distinct", () => {
-    const frames = renderAllRunCatFrames();
-    expect(frames.length).toBe(RUN_CAT_FRAMES);
-    for (let i = 0; i < frames.length; i++) {
-      for (let j = i + 1; j < frames.length; j++) {
-        const diff = frameDiff(frames[i], frames[j]);
-        expect(diff).toBeGreaterThan(0);
-      }
-    }
-  });
-
-  test("corners are transparent", () => {
-    const frame = renderRunCatFrame(0);
-    const size = RUN_CAT_SIZE;
-    expect(frame[3]).toBeLessThan(50);
-    expect(frame[(size - 1) * 4 + 3]).toBeLessThan(50);
-    expect(frame[(size * (size - 1)) * 4 + 3]).toBeLessThan(50);
-    expect(frame[(size * size - 1) * 4 + 3]).toBeLessThan(50);
-  });
-
-  test("run cat has visible pixels (not empty)", () => {
-    const frame = renderRunCatFrame(0);
-    const size = RUN_CAT_SIZE;
-    let opaque = 0;
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        if (frame[(y * size + x) * 4 + 3] > 40) opaque++;
-      }
-    }
-    expect(opaque).toBeGreaterThan(0);
-  });
-
-  test("rendering is deterministic", () => {
-    const a = renderRunCatFrame(2);
-    const b = renderRunCatFrame(2);
-    expect(a).toEqual(b);
-  });
-});

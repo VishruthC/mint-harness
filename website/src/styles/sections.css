@@ -282,7 +282,8 @@
 }
 
 .tui-input-text {
-  color: var(--terminal-muted);
+  color: var(--terminal-mint);
+  font-weight: 700;
 }
 
 @keyframes caret-blink {
@@ -934,7 +935,7 @@
 
 .stamp {
   position: absolute;
-  top: -34px;
+  top: -52px;
   right: 4px;
   z-index: 2;
   padding: 7px 12px 6px;
@@ -943,11 +944,11 @@
   color: var(--terminal-red);
   font-family: var(--font-pixel);
   text-align: center;
-  transform: rotate(-6deg) scale(0.92);
+  transform: translateY(260px) rotate(-6deg) scale(0.92);
   opacity: 0;
   transition:
     opacity 260ms var(--ease-out),
-    transform 360ms var(--ease-out),
+    transform 420ms var(--ease-out),
     border-color 360ms var(--ease-out),
     color 360ms var(--ease-out);
   pointer-events: none;
@@ -974,13 +975,13 @@
 
 .stamp.is-visible {
   opacity: 1;
-  transform: rotate(-6deg) scale(1);
+  transform: translateY(0) rotate(-6deg) scale(1);
 }
 
 .approval-pin.is-approved .stamp {
   border-color: var(--terminal-mint);
   color: var(--terminal-mint);
-  transform: rotate(-6deg) scale(1.03);
+  transform: translateY(0) rotate(-6deg) scale(1.03);
 }
 
 .keycap {
@@ -2161,7 +2162,7 @@
   }
 
   .stamp {
-    top: -29px;
+    top: -44px;
     right: 4px;
     padding: 5px 8px;
   }

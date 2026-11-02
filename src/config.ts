@@ -8,6 +8,7 @@ const EnvSchema = z.object({
   NVIDIA_MODEL: z.string().trim().optional().default(""),
   MINT_MAX_TOOL_ROUNDS: z.coerce.number().int().positive().default(DEFAULT_AGENT_LOOP_LIMITS.maxToolRounds),
   MINT_MAX_TOOL_CALLS_PER_TURN: z.coerce.number().int().positive().default(DEFAULT_AGENT_LOOP_LIMITS.maxToolCallsPerTurn),
+  MINT_EFFORT: z.enum(["low", "medium", "high", "max"]).optional().default("max"),
 });
 
 export type MintConfig = {
@@ -16,6 +17,7 @@ export type MintConfig = {
   preferredModel: string;
   maxToolRounds: number;
   maxToolCallsPerTurn: number;
+  effort: "low" | "medium" | "high" | "max";
 };
 
 function readDotEnv(path = ".env"): Record<string, string> {
@@ -52,6 +54,7 @@ export function loadConfig(env?: Record<string, string | undefined>): MintConfig
     NVIDIA_MODEL: source.NVIDIA_MODEL || "",
     MINT_MAX_TOOL_ROUNDS: source.MINT_MAX_TOOL_ROUNDS ?? String(DEFAULT_AGENT_LOOP_LIMITS.maxToolRounds),
     MINT_MAX_TOOL_CALLS_PER_TURN: source.MINT_MAX_TOOL_CALLS_PER_TURN ?? String(DEFAULT_AGENT_LOOP_LIMITS.maxToolCallsPerTurn),
+    MINT_EFFORT: source.MINT_EFFORT ?? "max",
   });
 
   if (!parsed.success) {
@@ -64,6 +67,7 @@ export function loadConfig(env?: Record<string, string | undefined>): MintConfig
     preferredModel: parsed.data.NVIDIA_MODEL,
     maxToolRounds: parsed.data.MINT_MAX_TOOL_ROUNDS,
     maxToolCallsPerTurn: parsed.data.MINT_MAX_TOOL_CALLS_PER_TURN,
+    effort: parsed.data.MINT_EFFORT,
   };
 }
 
@@ -73,6 +77,7 @@ const MINT_KEYS = [
   "NVIDIA_MODEL",
   "MINT_MAX_TOOL_ROUNDS",
   "MINT_MAX_TOOL_CALLS_PER_TURN",
+  "MINT_EFFORT",
 ] as const;
 
 function writeDotEnvAtomic(
@@ -114,6 +119,7 @@ export function writeDotEnv(config: MintConfig, path = ".env"): void {
       config.preferredModel ? `NVIDIA_MODEL="${config.preferredModel.replace(/"/g, '\\"')}"` : "",
       `MINT_MAX_TOOL_ROUNDS=${config.maxToolRounds}`,
       `MINT_MAX_TOOL_CALLS_PER_TURN=${config.maxToolCallsPerTurn}`,
+      `MINT_EFFORT=${config.effort}`,
     ].filter(Boolean);
 
     return [...otherLines, ...newLines];

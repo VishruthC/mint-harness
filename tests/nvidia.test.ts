@@ -53,9 +53,43 @@ describe("NvidiaClient", () => {
     expect(requestUrl).toBe("https://integrate.api.nvidia.com/v1/chat/completions");
     expect(requestBody.model).toBe("nvidia/test-model");
     expect(requestBody.stream).toBe(true);
+    expect(requestBody.stream_options).toEqual({ include_usage: true });
   });
 });
 
+test("emits provider usage from the final stream chunk", async () => {
+  const encoder = new TextEncoder();
+  const response = new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Hello"}}]}\n'));
+      controller.enqueue(encoder.encode('data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}\n'));
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
+  }), { status: 200, headers: { "Content-Type": "text/event-stream" } });
+  const client = new NvidiaClient("test-key", undefined, async () => response);
+  const events = [];
+  for await (const event of client.streamAgent("test-model", messages, [])) events.push(event);
+  expect(events).toEqual([
+    { type: "content", content: "Hello" },
+    { type: "usage", usage: { prompt: 10, completion: 2, total: 12 } },
+  ]);
+});
+
+test("handles a final usage chunk without a trailing newline", async () => {
+  const encoder = new TextEncoder();
+  const response = new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"Hi"}}]}\n'));
+      controller.enqueue(encoder.encode('data: {"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":1,"total_tokens":5}}'));
+      controller.close();
+    },
+  }), { status: 200, headers: { "Content-Type": "text/event-stream" } });
+  const client = new NvidiaClient("test-key", undefined, async () => response);
+  const events = [];
+  for await (const event of client.streamAgent("test-model", messages, [])) events.push(event);
+  expect(events).toContainEqual({ type: "usage", usage: { prompt: 4, completion: 1, total: 5 } });
+});
 test("streams fragmented OpenAI-compatible tool calls", async () => {
   const encoder = new TextEncoder();
   const response = new Response(new ReadableStream<Uint8Array>({

@@ -7,10 +7,6 @@
 export const CAT_ART_SIZE = 192;
 export const CAT_ART_FRAMES = 12;
 
-// Run cat (side-profile running animation for status indicator)
-export const RUN_CAT_FRAMES = 6;
-export const RUN_CAT_SIZE = 64;
-
 export type CatExpression =
   | "idle"
   | "happy"
@@ -844,132 +840,8 @@ export function renderAllFrames(expression: CatExpression, mood: CatMood, size =
   return frames;
 }
 
-export function renderRunCatFrame(frame: number, size = RUN_CAT_SIZE): Uint8Array {
-  const f = frame % RUN_CAT_FRAMES;
-  const animated = frame >= 0;
-
-  // Render at 2× for AA
-  const r = new AARenderer(size * 2);
-  const cx = size;
-  const cy = size;
-
-  // Animation values
-  const phase = animated ? (f / RUN_CAT_FRAMES) * Math.PI * 2 : 0;
-  const legPhase = phase;
-  const bodyBob = Math.sin(phase * 2) * 1.5;
-  const tailSwing = Math.sin(phase + 1) * 3;
-  const earBob = Math.sin(phase * 2) * 0.8;
-
-  // Colors - muted runner (#999FBA) to match theme text
-  const runnerColor = [153, 159, 186, 255] as Color; // muted
-  const runnerDark = [120, 125, 150, 255] as Color;  // darker muted
-  const runnerLight = [180, 185, 210, 255] as Color; // lighter muted
-  const outlineColor = [40, 32, 55, 255] as Color;
-
-  // Body (horizontal ellipse, running pose)
-  const bodyY = cy + 8 + bodyBob;
-  const bodyRx = 22;
-  const bodyRy = 14;
-  drawEllipse(r, cx, bodyY, bodyRx, bodyRy, runnerColor, 1.5);
-  drawEllipseOutline(r, cx, bodyY, bodyRx, bodyRy, outlineColor, 2);
-
-  // Head (smaller, forward)
-  const headX = cx + 18;
-  const headY = bodyY - 14 + bodyBob * 0.5 + earBob;
-  const headRx = 10;
-  const headRy = 9;
-  drawEllipse(r, headX, headY, headRx, headRy, runnerColor, 1.5);
-  drawEllipseOutline(r, headX, headY, headRx, headRy, outlineColor, 2);
-
-  // Ear (single, streaming back)
-  const earX = headX - 4;
-  const earY = headY - headRy - 2 + earBob;
-  drawTriangle(r, earX, earY + 3, earX - 6, earY - 8, earX + 2, earY, runnerColor, 1);
-  drawTriangleOutline(r, earX, earY + 3, earX - 6, earY - 8, earX + 2, earY, outlineColor, 2);
-
-  // Eye (simple dot, focused forward)
-  const eyeX = headX + 4;
-  const eyeY = headY - 1;
-  drawEllipse(r, eyeX, eyeY, 2, 2, outlineColor, 0.5);
-
-  // Nose
-  drawEllipse(r, headX + headRx + 1, headY + 1, 1.5, 1, runnerDark, 0.5);
-
-  // Front legs (animated)
-  const legRx = 3;
-  const legRy = 10;
-  // Front leg 1
-  const fl1X = cx + 12;
-  const fl1Y = bodyY + bodyRy - 2 + Math.sin(legPhase) * 5;
-  drawEllipse(r, fl1X, fl1Y, legRx, legRy, runnerColor, 1);
-  drawEllipseOutline(r, fl1X, fl1Y, legRx, legRy, outlineColor, 1.5);
-  // Front leg 2 (opposite phase)
-  const fl2X = cx + 8;
-  const fl2Y = bodyY + bodyRy - 2 - Math.sin(legPhase) * 4;
-  drawEllipse(r, fl2X, fl2Y, legRx, legRy, runnerColor, 1);
-  drawEllipseOutline(r, fl2X, fl2Y, legRx, legRy, outlineColor, 1.5);
-
-  // Back legs (animated, opposite to front)
-  const blRx = 4;
-  const blRy = 12;
-  // Back leg 1
-  const bl1X = cx - 10;
-  const bl1Y = bodyY + bodyRy - 1 - Math.sin(legPhase) * 6;
-  drawEllipse(r, bl1X, bl1Y, blRx, blRy, runnerColor, 1);
-  drawEllipseOutline(r, bl1X, bl1Y, blRx, blRy, outlineColor, 1.5);
-  // Back leg 2
-  const bl2X = cx - 14;
-  const bl2Y = bodyY + bodyRy - 1 + Math.sin(legPhase) * 5;
-  drawEllipse(r, bl2X, bl2Y, blRx, blRy, runnerColor, 1);
-  drawEllipseOutline(r, bl2X, bl2Y, blRx, blRy, outlineColor, 1.5);
-
-  // Tail (streaming back, animated)
-  const tailBaseX = cx - bodyRx - 2;
-  const tailBaseY = bodyY + 2;
-  const tailTipX = tailBaseX - 18 - tailSwing;
-  const tailTipY = tailBaseY - 8 + Math.sin(phase + 0.5) * 2;
-  const tailCtrlX = tailBaseX - 8;
-  const tailCtrlY = tailBaseY - 10;
-  // Tail segments
-  for (let t = 0; t <= 1; t += 0.05) {
-    const mt = 1 - t;
-    const x = mt * mt * tailBaseX + 2 * mt * t * tailCtrlX + t * t * tailTipX;
-    const y = mt * mt * tailBaseY + 2 * mt * t * tailCtrlY + t * t * tailTipY;
-    const thickness = 6 * (1 - t * 0.7);
-    drawEllipse(r, x, y, thickness, thickness, runnerColor, 0.8);
-  }
-  for (let t = 0; t <= 1; t += 0.05) {
-    const mt = 1 - t;
-    const x = mt * mt * tailBaseX + 2 * mt * t * tailCtrlX + t * t * tailTipX;
-    const y = mt * mt * tailBaseY + 2 * mt * t * tailCtrlY + t * t * tailTipY;
-    const thickness = 6 * (1 - t * 0.7);
-    drawEllipseOutline(r, x, y, thickness, thickness, outlineColor, 1.5);
-  }
-
-  // Speed lines (dust kicks) when moving fast
-  if (animated) {
-    const speedLineColor: Color = [runnerLight[0], runnerLight[1], runnerLight[2], 120];
-    for (let i = 0; i < 3; i++) {
-      const sx = cx - bodyRx - 10 - (f * 4 + i * 6) % 20;
-      const sy = bodyY + bodyRy - 2 + i * 5;
-      drawLine(r, sx, sy, sx - 8, sy - 1, speedLineColor, 1.5);
-    }
-  }
-
-  // Downsample and return
-  return r.downsample2x();
-}
-
-/** Generate all run cat frames (for testing) */
-export function renderAllRunCatFrames(size = RUN_CAT_SIZE): Uint8Array[] {
-  const frames: Uint8Array[] = [];
-  for (let f = 0; f < RUN_CAT_FRAMES; f++) {
-    frames.push(renderRunCatFrame(f, size));
-  }
-  return frames;
-}
-
-/** Get distinct pixel count between two frames */
+/**
+ * Get distinct pixel count between two frames */
 export function frameDiff(a: Uint8Array, b: Uint8Array): number {
   let diff = 0;
   for (let i = 0; i < a.length; i += 4) {

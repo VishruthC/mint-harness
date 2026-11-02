@@ -7,8 +7,9 @@ import { buildSystemPrompt, executeModelTool, getCapabilities, getModelTools } f
 import { SessionStore, type StoredMessage, type Session } from "./storage";
 import { WorkspaceTools } from "./tools";
 import { ApprovedTerminal } from "./terminal";
+import { EMPTY_TOKEN_USAGE, addTokenUsage, formatTokenCount, type TokenUsage } from "./usage";
 import { CAT_EXPRESSIONS, catProfileSummary, feedCat, petCat, selectCatExpression, type CatMood, type CatExpressionId } from "./cat";
-import { CatPortrait, RunCatIndicator } from "./cat-portrait";
+import { CatPortrait } from "./cat-portrait";
 import { renderCatFrame, CAT_ART_SIZE, CAT_ART_FRAMES, type CatExpression } from "./cat-art";
 import type { CatProfile } from "./storage";
 import {
@@ -39,7 +40,11 @@ import {
   findModel,
   isValidModelId,
 } from "./models";
-import { createHostClipboard, createClipboard, createRendererClipboardAdapter, decodePasteBytes, stripAnsiSequences } from "@opentui/core";
+import { createHostClipboard, createClipboard, createRendererClipboardAdapter, decodePasteBytes, stripAnsiSequences, SyntaxStyle } from "@opentui/core";
+import type { CliRenderer } from "@opentui/core";
+import { parseMessageSegments, type MessageSegment } from "./message-segments";
+import { execFileSync } from "node:child_process";
+import { homedir } from "node:os";
 
 const colors = {
   bg: "#1e1e2e",
@@ -51,269 +56,216 @@ const colors = {
   mint: "#a6e3a1",
   peach: "#fab387",
   red: "#f38ba8",
+  rule: "#3c3c50",
 };
+const DIFF_ADD_BG = "#21362a";
+const DIFF_REMOVE_BG = "#3a2430";
+const MARKDOWN_STYLES = {
+  "markup.heading": { fg: colors.mint, bold: true },
+  "markup.strong": { bold: true },
+  "markup.italic": { italic: true },
+  "markup.strikethrough": { fg: colors.muted, dim: true },
+  "markup.raw": { fg: colors.peach, bg: "#313244" },
+  "markup.link": { fg: colors.lavender, underline: true },
+  "markup.link.label": { fg: colors.lavender, underline: true },
+  "markup.link.url": { fg: colors.muted, underline: true },
+  "markup.quote": { fg: colors.muted, italic: true },
+  "markup.list": { fg: colors.peach },
+  conceal: { fg: colors.muted },
+};
+const UI_SCALE = 0.9;
+const scaledCells = (cells: number) => Math.max(1, Math.round(cells * UI_SCALE));
+type Palette = typeof colors;
 
-type ViewMessage = { role: "user" | "assistant" | "system"; content: string };
+const markdownStyleCache = new WeakMap<CliRenderer, SyntaxStyle>();
 
-type MessageSegment =
-  | { type: "text"; content: string }
-  | { type: "reasoning"; content: string }
-  | { type: "code"; language: string; content: string }
-  | { type: "diff"; language: string; content: string; hunks: DiffHunk[] };
-
-interface DiffHunk {
-  oldStart: number;
-  oldLines: number;
-  newStart: number;
-  newLines: number;
-  lines: DiffLine[];
+function getMarkdownStyle(renderer: CliRenderer): SyntaxStyle {
+  const cached = markdownStyleCache.get(renderer);
+  if (cached) return cached;
+  const style = SyntaxStyle.fromStyles(MARKDOWN_STYLES, renderer.nativeScene as any);
+  markdownStyleCache.set(renderer, style);
+  return style;
 }
 
-interface DiffLine {
-  type: "context" | "add" | "remove";
-  content: string;
-  oldLineNum?: number;
-  newLineNum?: number;
+/** Read the current git branch once; empty when not a repo. */
+function detectGitBranch(root: string): string {
+  try {
+    const branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: root,
+      timeout: 300,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    return branch && branch !== "HEAD" ? branch : "";
+  } catch {
+    return "";
+  }
 }
 
-// Parse assistant message into structured segments for rich rendering
-function parseMessageSegments(content: string): MessageSegment[] {
-  const segments: MessageSegment[] = [];
-  let remaining = content;
+type ViewMessage = { role: "user" | "assistant" | "system"; content: string; kind?: "text" | "tool" | "result" | "proposal" | "approval" | "error"; meta?: Record<string, string> };
 
-  // Regex to match fenced code blocks with optional diff language
-  const codeBlockRegex = /^```(\w+)?\n([\s\S]*?)\n```/gm;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
+// Message segment parsing lives in src/message-segments.ts so it can be unit-tested
+// without pulling in the Solid/OpenTUI renderer.
+import type { DiffHunk, DiffLine } from "./message-segments";
+export type { DiffHunk, DiffLine };
 
-  while ((match = codeBlockRegex.exec(remaining)) !== null) {
-    const [fullMatch, language = "", codeContent] = match;
-    const matchStart = match.index;
-    const matchEnd = match.index + fullMatch.length;
-
-    // Text before this code block
-    if (matchStart > lastIndex) {
-      const textContent = remaining.slice(lastIndex, matchStart).trimEnd();
-      if (textContent) {
-        // Check for reasoning blocks in text
-        const reasoningParts = splitReasoning(textContent);
-        segments.push(...reasoningParts);
-      }
+function formatToolArgs(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === "object") {
+      const first = Object.values(parsed).find((v) => typeof v === "string") as string | undefined;
+      if (first !== undefined) return JSON.stringify(first);
     }
-
-    // Check if this is a diff block
-    if (language.toLowerCase() === "diff") {
-      const diffSegments = parseDiffBlock(codeContent);
-      segments.push(...diffSegments);
-    } else {
-      segments.push({ type: "code", language, content: codeContent });
-    }
-
-    lastIndex = matchEnd;
+  } catch {
+    // fall through to raw
   }
-
-  // Remaining text after last code block
-  if (lastIndex < remaining.length) {
-    const textContent = remaining.slice(lastIndex).trimEnd();
-    if (textContent) {
-      const reasoningParts = splitReasoning(textContent);
-      segments.push(...reasoningParts);
-    }
-  }
-
-  // If no segments found, treat entire content as text
-  if (segments.length === 0) {
-    const reasoningParts = splitReasoning(content);
-    segments.push(...reasoningParts);
-  }
-
-  return segments;
+  return trimmed.length > 60 ? trimmed.slice(0, 57) + "…" : trimmed;
 }
-
-// Split text into reasoning and regular text segments
-function splitReasoning(text: string): MessageSegment[] {
-  const segments: MessageSegment[] = [];
-  const reasoningRegex = /<thinking>([\s\S]*?)<\/thinking>/gi;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = reasoningRegex.exec(text)) !== null) {
-    const [fullMatch, reasoningContent] = match;
-    const matchStart = match.index;
-    const matchEnd = match.index + fullMatch.length;
-
-    if (matchStart > lastIndex) {
-      const textContent = text.slice(lastIndex, matchStart);
-      if (textContent.trim()) {
-        segments.push({ type: "text", content: textContent });
-      }
-    }
-
-    if (reasoningContent.trim()) {
-      segments.push({ type: "reasoning", content: reasoningContent.trim() });
-    }
-
-    lastIndex = matchEnd;
-  }
-
-  if (lastIndex < text.length) {
-    const textContent = text.slice(lastIndex);
-    if (textContent.trim()) {
-      segments.push({ type: "text", content: textContent });
-    }
-  }
-
-  if (segments.length === 0 && text.trim()) {
-    segments.push({ type: "text", content: text });
-  }
-
-  return segments;
-}
-
-// Parse a diff block into structured diff segments
-function parseDiffBlock(diffContent: string): MessageSegment[] {
-  const segments: MessageSegment[] = [];
-  // Match unified diff format: @@ -oldStart,oldLines +newStart,newLines @@
-  const hunkRegex = /^@@\s+-(\d+),?(\d*)\s+\+(\d+),?(\d*)\s+@@/gm;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  const hunks: DiffHunk[] = [];
-
-  while ((match = hunkRegex.exec(diffContent)) !== null) {
-    const oldStart = parseInt(match[1], 10);
-    const oldLines = match[2] ? parseInt(match[2], 10) : 1;
-    const newStart = parseInt(match[3], 10);
-    const newLines = match[4] ? parseInt(match[4], 10) : 1;
-    const hunkStart = match.index;
-    const hunkEnd = hunkRegex.lastIndex;
-
-    // Extract lines for this hunk (until next hunk or end)
-    const nextMatch = hunkRegex.exec(diffContent);
-    const hunkContentEnd = nextMatch ? nextMatch.index : diffContent.length;
-    if (nextMatch) hunkRegex.lastIndex = nextMatch.index; // reset for next iteration
-
-    const hunkLinesContent = diffContent.slice(hunkEnd, hunkContentEnd).trimEnd();
-    const lines = parseDiffLines(hunkLinesContent, oldStart, newStart);
-
-    hunks.push({ oldStart, oldLines, newStart, newLines, lines });
-  }
-
-  if (hunks.length > 0) {
-    segments.push({ type: "diff", language: "diff", content: diffContent, hunks });
-  } else {
-    // Fallback: treat as regular code block
-    segments.push({ type: "code", language: "diff", content: diffContent });
-  }
-
-  return segments;
-}
-
-// Parse individual diff lines within a hunk
-function parseDiffLines(content: string, oldStart: number, newStart: number): DiffLine[] {
-  const lines: DiffLine[] = [];
-  let oldLineNum = oldStart;
-  let newLineNum = newStart;
-
-  for (const line of content.split("\n")) {
-    if (line.startsWith("+")) {
-      lines.push({ type: "add", content: line.slice(1), newLineNum: newLineNum++ });
-    } else if (line.startsWith("-")) {
-      lines.push({ type: "remove", content: line.slice(1), oldLineNum: oldLineNum++ });
-    } else {
-      lines.push({ type: "context", content: line.slice(1), oldLineNum: oldLineNum++, newLineNum: newLineNum++ });
-    }
-  }
-
-  return lines;
-}
-
-// Render a single message segment into JSX
-function renderSegment(segment: MessageSegment, colors: typeof colors): JSX.Element {
+function renderSegment(segment: MessageSegment, colors: Palette, markdownStyle: SyntaxStyle): JSX.Element {
   switch (segment.type) {
     case "text":
       return (
-        <text fg={colors.text} wrapMode="word" width="100%" minWidth={0}>
-          {segment.content}
-        </text>
+        <markdown
+          content={segment.content}
+          syntaxStyle={markdownStyle}
+          fg={colors.text}
+          conceal={true}
+          width="100%"
+          minWidth={0}
+        />
       );
     case "reasoning":
       return (
         <box flexDirection="column" gap={0} width="100%" minWidth={0} backgroundColor={colors.bg} padding={1} borderStyle="single" borderColor={colors.muted}>
           <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>◆ reasoning</text>
-          <text fg={colors.muted} wrapMode="word" width="100%" minWidth={0} opacity={0.8}>
-            {segment.content}
-          </text>
+          <markdown
+            content={segment.content}
+            syntaxStyle={markdownStyle}
+            fg={colors.muted}
+            conceal={true}
+            width="100%"
+            minWidth={0}
+          />
         </box>
       );
-    case "code":
+    case "code": {
+      const lines = segment.content.replace(/\r\n?/g, "\n").split("\n");
+      if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+      if (lines.length === 0) lines.push("");
+      const gutterWidth = Math.max(2, String(lines.length).length);
+      const gutterText = lines
+        .map((_, i) => String(i + 1).padStart(gutterWidth) + " ")
+        .join("\n");
+      const bodyText = lines.map((line) => (line.length ? line : " ")).join("\n");
       return (
-        <box flexDirection="column" gap={0} width="100%" minWidth={0} backgroundColor={colors.bg} padding={1} borderStyle="single" borderColor={colors.muted}>
+        <box flexDirection="column" gap={0} width="100%" minWidth={0} backgroundColor={colors.bg} padding={1} borderStyle="single" borderColor={colors.muted} overflow="hidden">
           <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>
             {segment.language ? `◆ ${segment.language}` : "◆ code"}
           </text>
-          <text fg={colors.text} wrapMode="none" width="100%" minWidth={0} fontFamily="monospace">
-            {segment.content}
-          </text>
+          <box flexDirection="row" width="100%" minWidth={0} overflow="hidden">
+            <text fg={colors.muted} wrapMode="none" flexShrink={0}>{gutterText}</text>
+            <text fg={colors.text} wrapMode="none" flexGrow={1} minWidth={0}>{bodyText}</text>
+          </box>
         </box>
       );
-    case "diff":
+    }
+    case "diff": {
+      const allLines = segment.hunks.flatMap((hunk) => hunk.lines);
+      const maxLine = allLines.reduce((max, line) => {
+        const n = line.type === "remove" ? (line.oldLineNum ?? 0) : (line.newLineNum ?? 0);
+        return Math.max(max, n);
+      }, 1);
+      const gutterWidth = Math.max(2, String(maxLine).length);
+      const diffTitle = segment.file ? `◆ diff · ${segment.file}` : "◆ diff";
       return (
-        <box flexDirection="column" gap={0} width="100%" minWidth={0} backgroundColor={colors.bg} padding={1} borderStyle="single" borderColor={colors.muted}>
-          <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>◆ diff</text>
+        <box flexDirection="column" gap={0} width="100%" minWidth={0} backgroundColor={colors.bg} padding={1} borderStyle="single" borderColor={colors.muted} overflow="hidden">
+          <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>{diffTitle}</text>
           <For each={segment.hunks}>
             {(hunk) => (
               <box flexDirection="column" gap={0} width="100%" minWidth={0}>
-                <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true} fontFamily="monospace">
+                <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>
                   @@ -{hunk.oldStart},{hunk.oldLines} +{hunk.newStart},{hunk.newLines} @@
                 </text>
                 <For each={hunk.lines}>
-                  {(line) => (
-                    <box
-                      flexDirection="row"
-                      width="100%"
-                      minWidth={0}
-                      height={1}
-                      minHeight={1}
-                      backgroundColor={
-                        line.type === "add" ? "#1a3a2a" : // green/blue background for added
-                        line.type === "remove" ? "#3a1a1a" : // red background for removed
-                        colors.bg
-                      }
-                    >
-                      <text
-                        fg={line.type === "add" ? colors.mint : line.type === "remove" ? colors.red : colors.muted}
-                        wrapMode="none"
-                        width={4}
-                        minWidth={4}
-                        fontFamily="monospace"
-                      >
-                        {line.type === "add" ? "+ " : line.type === "remove" ? "- " : "  "}
-                      </text>
-                      <text
-                        fg={line.type === "add" ? colors.mint : line.type === "remove" ? colors.red : colors.text}
-                        wrapMode="none"
-                        flexGrow={1}
+                  {(line) => {
+                    const rowBg =
+                      line.type === "add" ? DIFF_ADD_BG : line.type === "remove" ? DIFF_REMOVE_BG : colors.bg;
+                    const lineNo =
+                      line.type === "remove" ? line.oldLineNum : line.newLineNum;
+                    const sign = line.type === "add" ? "+" : line.type === "remove" ? "-" : " ";
+                    const contentColor =
+                      line.type === "add" ? colors.mint : line.type === "remove" ? colors.red : colors.muted;
+                    const signColor =
+                      line.type === "add" ? colors.mint : line.type === "remove" ? colors.red : colors.muted;
+                    return (
+                      <box
+                        flexDirection="row"
+                        width="100%"
                         minWidth={0}
-                        fontFamily="monospace"
+                        height={1}
+                        minHeight={1}
+                        backgroundColor={rowBg}
+                        overflow="hidden"
                       >
-                        {line.content}
-                      </text>
-                    </box>
-                  )}
+                        <text
+                          fg={colors.muted}
+                          bg={rowBg}
+                          wrapMode="none"
+                          width={gutterWidth + 1}
+                          minWidth={gutterWidth + 1}
+                          textAlign="right"
+                        >
+                          {String(lineNo ?? "").padStart(gutterWidth) + " "}
+                        </text>
+                        <text
+                          fg={signColor}
+                          bg={rowBg}
+                          wrapMode="none"
+                          width={2}
+                          minWidth={2}
+                          textAlign="center"
+                        >
+                          {sign}
+                        </text>
+                        <text
+                          fg={contentColor}
+                          bg={rowBg}
+                          wrapMode="none"
+                          flexGrow={1}
+                          minWidth={0}
+                        >
+                          {line.content.length ? line.content : " "}
+                        </text>
+                      </box>
+                    );
+                  }}
                 </For>
               </box>
             )}
           </For>
         </box>
       );
+    }
   }
 }
 
 function App() {
   const [input, setInput] = createSignal("");
   const [cursorPos, setCursorPos] = createSignal(0);
+  const cursorChar = () => input()[cursorPos()] ?? "";
+  const cursorGlyph = () => {
+    const ch = cursorChar();
+    return ch && ch !== "\n" ? ch : " ";
+  };
+  const cursorAdvance = () => {
+    const ch = cursorChar();
+    return ch && ch !== "\n" ? 1 : 0;
+  };
   const [commandIndex, setCommandIndex] = createSignal(0);
   const renderer = useRenderer();
+  const markdownStyle = createMemo(() => getMarkdownStyle(renderer));
   const terminal = useTerminalDimensions();
   // Keep the palette, input, and chat chrome on screen at short terminal heights.
   // Leave extra room for the palette while command suggestions are open.
@@ -374,7 +326,6 @@ function App() {
   const [model, setModel] = createSignal("");
   const [status, setStatus] = createSignal("starting");
   const [busy, setBusy] = createSignal(false);
-  const [runCatSpeed, setRunCatSpeed] = createSignal<"trot" | "run" | "sprint">("run");
   const [notice, setNotice] = createSignal("Connecting to NVIDIA…");
   let workspaceTools: WorkspaceTools | undefined;
   let terminalTools: ApprovedTerminal | undefined;
@@ -485,6 +436,7 @@ function App() {
   void WorkspaceTools.create().then((tools) => {
     workspaceTools = tools;
     terminalTools = new ApprovedTerminal(tools.root);
+    setWorkspaceBranch(detectGitBranch(tools.root));
     setNotice(`workspace: ${tools.root}`);
   }).catch((error) => {
     setNotice(error instanceof Error ? error.message : "Workspace initialization failed");
@@ -506,11 +458,27 @@ function App() {
   // Session state - lazy creation
   const [session, setSession] = createSignal<string | null>(null);
   const [draftSessionTitle, setDraftSessionTitle] = createSignal<string>("");
+  const [workspaceBranch, setWorkspaceBranch] = createSignal("");
+  const [sessionTokens, setSessionTokens] = createSignal<TokenUsage>({ ...EMPTY_TOKEN_USAGE });
   let client: NvidiaClient | undefined;
   let configuredModel = "";
   let lastUserPrompt = "";
   let activeController: AbortController | undefined;
   const sidebarVisible = () => terminal().width >= 100;
+  const sidebarMetrics = () => {
+    const w = terminal().width;
+    const h = terminal().height;
+    if (w >= 160) {
+      const catH = Math.min(scaledCells(20), Math.max(scaledCells(6), h - 18));
+      return { visible: w >= 100, sidebarWidth: scaledCells(44), catHeight: catH };
+    }
+    if (w >= 128) {
+      const catH = Math.min(scaledCells(16), Math.max(scaledCells(6), h - 18));
+      return { visible: w >= 100, sidebarWidth: scaledCells(36), catHeight: catH };
+    }
+    const catH = Math.min(scaledCells(12), Math.max(scaledCells(6), h - 18));
+    return { visible: w >= 100, sidebarWidth: scaledCells(32), catHeight: catH };
+  };
 
   // Model picker state
   const [modelPickerOpen, setModelPickerOpen] = createSignal(false);
@@ -526,7 +494,7 @@ function App() {
   const [renameError, setRenameError] = createSignal("");
   // Approximate usable text width inside the chat input box after outer padding,
   // the optional sidebar, and panel/input padding. Used to pick compact copy.
-  const chatWidth = () => Math.max(0, terminal().width - (sidebarVisible() ? 37 : 6));
+  const chatWidth = () => Math.max(0, terminal().width - (sidebarVisible() ? sidebarMetrics().sidebarWidth + 5 : 6));
   const inputHint = () =>
     chatWidth() >= 114
       ? "Enter send · Shift+Enter newline · F2 cat · Ctrl+Shift+V paste · select to copy · /retry · /cancel"
@@ -543,6 +511,70 @@ function App() {
         : terminal().width >= 26
           ? "MINT ♡ · approval-gated"
           : "MINT ♡";
+
+  const displayModelName = (id: string): string => {
+    if (!id) return "no model";
+    // Strip vendor prefix (meta/, nvidia/, etc.)
+    const parts = id.split("/");
+    const name = parts.length > 1 ? parts[1] : parts[0];
+    const brands: Record<string, string> = {
+      deepseek: "DeepSeek",
+      openai: "OpenAI",
+      gpt: "GPT",
+      llm: "LLM",
+      ai: "AI",
+      moe: "MoE",
+    };
+    // Prettify: split on dashes/underscores, capitalize words
+    return name
+      .split(/[-_]/)
+      .map((w) => brands[w.toLowerCase()] ?? (w.length <= 2 ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+      .join(" ");
+  };
+
+  const effort = () => {
+    try {
+      const config = loadConfig();
+      return config.effort;
+    } catch {
+      return "max";
+    }
+  };
+
+  const workspaceRoot = () => {
+    try {
+      return workspaceTools?.root || process.cwd();
+    } catch {
+      return process.cwd();
+    }
+  };
+
+  const workspaceLabel = () => {
+    const root = workspaceRoot();
+    const home = homedir();
+    const normalize = (path: string) => path.replace(/\\/g, "/").replace(/\/+$/, "");
+    const normalizedRoot = normalize(root);
+    const normalizedHome = normalize(home);
+    if (normalizedRoot === normalizedHome) return "~";
+    if (normalizedRoot.toLowerCase().startsWith(`${normalizedHome.toLowerCase()}/`)) {
+      return `~${normalizedRoot.slice(normalizedHome.length)}`;
+    }
+    return root;
+  };
+
+const showTokenUsage = () => terminal().width >= 48;
+  const tokenUsageLabel = () => `${formatTokenCount(sessionTokens().total)} tokens`;
+  const footerLabel = () => {
+    const parts = [workspaceLabel()];
+    if (workspaceBranch() && terminal().width >= 60) parts.push(workspaceBranch());
+    const full = parts.join(" · ");
+    const sidebarChrome = sidebarVisible() ? sidebarMetrics().sidebarWidth + 5 : 4;
+    const tokenChrome = showTokenUsage() ? tokenUsageLabel().length + 1 : 0;
+    const available = Math.max(8, terminal().width - sidebarChrome - tokenChrome);
+    if (full.length <= available) return full;
+    // Keep the folder name and branch visible; trim the start of long paths.
+    return "…" + full.slice(full.length - available + 1);
+  };
   const commandPaletteHeader = () =>
     terminal().width >= 64 ? "COMMANDS  ·  ↑/↓ select  ·  Tab complete" : "COMMANDS  ·  ↑/↓  ·  Tab";
 
@@ -590,6 +622,7 @@ function App() {
     setMessages([{ role: "assistant", content: `Fresh session! Send a message to save it. ♡` }]);
     setNotice("draft session ready");
     lastUserPrompt = "";
+    setSessionTokens({ ...EMPTY_TOKEN_USAGE });
   };
 
   const resumeSession = (id: string) => {
@@ -605,6 +638,7 @@ function App() {
     setMessages(stored.filter((m) => m.role !== "system"));
     setModel(found.model || model());
     setNotice(`resumed session ${id}`);
+    setSessionTokens(store.getSessionTokenUsage(id));
   };
 
   const refreshModels = async () => {
@@ -811,6 +845,7 @@ function App() {
         preferredModel: resolvedModel,
         maxToolRounds: agentLimits.maxToolRounds,
         maxToolCallsPerTurn: agentLimits.maxToolCallsPerTurn,
+        effort: "max",
       };
       writeDotEnv(mergedConfig);
 
@@ -1432,7 +1467,6 @@ No file has been changed. Review this preview, then type /apply to approve or /r
     const updatedHistory: ChatMessage[] = [systemMessage(), ...history().filter((message) => message.role !== "system"), { role: "user", content: text }];
     setHistory(updatedHistory);
     setBusy(true);
-    setRunCatSpeed("trot");
     setCatMood("thinking");
     activeController = new AbortController();
     setNotice(`thinking with ${model()}…`);
@@ -1446,10 +1480,10 @@ No file has been changed. Review this preview, then type /apply to approve or /r
       while (budget.startRound()) {
         answer = "";
         let requestedCalls: ToolCall[] = [];
+        let roundUsage: TokenUsage | null = null;
         const registeredTools = getModelTools(Boolean(workspaceTools));
         for await (const event of client.streamAgent(model(), workingHistory, registeredTools, activeController.signal)) {
           if (event.type === "content") {
-            setRunCatSpeed("run");
             answer += event.content;
             setMessages((old) => {
               const next = [...old];
@@ -1457,9 +1491,17 @@ No file has been changed. Review this preview, then type /apply to approve or /r
               if (last?.role === "assistant") next[next.length - 1] = { ...last, content: answer };
               return next;
             });
+          } else if (event.type === "usage") {
+            roundUsage = event.usage;
           } else {
             requestedCalls = event.toolCalls;
           }
+        }
+        if (roundUsage) {
+          const usage = roundUsage;
+          setSessionTokens((prev) => addTokenUsage(prev, usage));
+          const sid = session();
+          if (sid) store.addSessionTokenUsage(sid, usage);
         }
 
         if (!requestedCalls.length) {
@@ -1478,16 +1520,19 @@ No file has been changed. Review this preview, then type /apply to approve or /r
         // Keep tool calls inside the current API turn. They are not displayed as final answers.
         workingHistory.push({ role: "assistant", content: answer || null, tool_calls: requestedCalls });
         answer = "";
+        // Surface a timeline entry per tool call instead of a single placeholder.
         setMessages((old) => {
           const next = [...old];
           const last = next[next.length - 1];
-          if (last?.role === "assistant") next[next.length - 1] = { ...last, content: "Using registered workspace tools…" };
+          if (last?.role === "assistant" && !last.kind) next[next.length - 1] = { ...last, content: "" };
           return next;
         });
         let proposalPreview: string | undefined;
         for (const call of requestedCalls) {
-          setRunCatSpeed("sprint");
           setNotice(`running ${call.function.name}…`);
+          // Tool call timeline line
+          const args = formatToolArgs(call.function.arguments ?? "");
+          setMessages((old) => [...old, { role: "assistant", content: "", kind: "tool", meta: { name: call.function.name, args } }]);
           const result = pendingProposalId && ["workspace_propose_write", "workspace_propose_patch"].includes(call.function.name)
             ? { ok: false as const, error: "A file proposal is already pending. Ask the user to /apply or /reject it before creating another." }
             : pendingCommandId && call.function.name === "terminal_propose"
@@ -1506,12 +1551,22 @@ No file has been changed. Review this preview, then type /apply to approve or /r
           }
           if (result.ok && ["workspace_propose_write", "workspace_propose_patch", "terminal_propose"].includes(call.function.name)) proposalPreview = result.output;
           workingHistory.push({ role: "tool", tool_call_id: call.id, content: toolOutput });
+          // Result timeline line
+          const firstLine = toolOutput.split("\n")[0]?.slice(0, 120) ?? "";
+          setMessages((old) => [...old, { role: "assistant", content: firstLine, kind: "result" }]);
+          if (result.ok && ["workspace_propose_write", "workspace_propose_patch"].includes(call.function.name)) {
+            setMessages((old) => [...old, { role: "assistant", content: "proposal · ready to review", kind: "proposal" }]);
+            setMessages((old) => [...old, { role: "assistant", content: "· awaiting /apply", kind: "approval" }]);
+          }
+          if (result.ok && call.function.name === "terminal_propose") {
+            setMessages((old) => [...old, { role: "assistant", content: "· awaiting /run", kind: "approval" }]);
+          }
         }
         setMessages((old) => {
           const next = [...old];
           const last = next[next.length - 1];
-          if (last?.role === "assistant") next[next.length - 1] = { ...last, content: proposalPreview ?? "" };
-          if (proposalPreview) next.push({ role: "assistant", content: "" });
+          if (last?.role === "assistant" && !last.kind) next[next.length - 1] = { ...last, content: proposalPreview ?? "" };
+          if (proposalPreview) next.push({ role: "assistant", content: "", kind: "text" });
           return next;
         });
       }
@@ -1845,7 +1900,7 @@ No file has been changed. Review this preview, then type /apply to approve or /r
           width={Math.min(width, terminal().width - 4)}
           minWidth={minWidth}
           backgroundColor={colors.panel}
-          borderStyle="rounded"
+          borderStyle="single"
           borderColor={borderColor}
           padding={1}
           gap={1}
@@ -1953,102 +2008,108 @@ No file has been changed. Review this preview, then type /apply to approve or /r
 
   return (
     <box flexDirection="column" backgroundColor={colors.bg} width="100%" height="100%">
-      <box flexDirection="row" justifyContent="space-between" backgroundColor={colors.panel} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
-        <box flexDirection="row" gap={1} minWidth={0} flexShrink={1}>
-          <Show when={terminal().width >= 52}>
-            <ascii_font text="MINT" font="tiny" color={colors.pink} backgroundColor="transparent" selectable={false} />
-          </Show>
-          <Show when={terminal().width < 52}>
-            <text fg={colors.pink} wrapMode="none" flexShrink={0}>✿ MINT</text>
-          </Show>
-          <Show when={terminal().width >= 72}>
-            <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>/ tiny coding companion</text>
-          </Show>
-        </box>
-        <box flexDirection="row" gap={2} minWidth={0} flexShrink={0}>
+      <box flexDirection="column" backgroundColor={colors.panel} width="100%" minWidth={0} flexShrink={0} overflow="hidden" border={["bottom"]} borderColor={colors.rule}>
+        <box flexDirection="row" justifyContent="space-between" paddingLeft={1} paddingRight={1} width="100%" minWidth={0} overflow="hidden">
+          <box flexDirection="row" gap={1} minWidth={0} flexShrink={1}>
+            <Show when={terminal().width >= 52}>
+              <ascii_font text="MINT" font="tiny" color={colors.pink} backgroundColor="transparent" selectable={false} />
+            </Show>
+            <Show when={terminal().width < 52}>
+              <text fg={colors.pink} wrapMode="none" flexShrink={0}>✿ MINT</text>
+            </Show>
+            <Show when={terminal().width >= 72}>
+              <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>/ tiny coding companion</text>
+            </Show>
+          </box>
           <Show when={terminal().width >= 60}>
-            <text fg={colors.lavender} wrapMode="none" flexShrink={0}>✧ {getSessionTitle()} ✧</text>
+            <box flexGrow={1} justifyContent="center" minWidth={0} overflow="hidden">
+              <text fg={colors.lavender} wrapMode="none" textAlign="center" truncate={true}>✧ {getSessionTitle()} ✧</text>
+            </box>
           </Show>
-          <Show when={terminal().width >= 48}>
-            <text fg={status() === "connected" ? colors.mint : status() === "error" ? colors.red : colors.peach} wrapMode="none" flexShrink={0}>
-              {status() === "connected" ? "● connected" : status() === "error" ? "● error" : "◌ connecting"}
-            </text>
-          </Show>
-          <Show when={terminal().width < 48}>
-            <text fg={status() === "connected" ? colors.mint : status() === "error" ? colors.red : colors.peach} wrapMode="none" flexShrink={0}>
-              {status() === "connected" ? "●" : status() === "error" ? "✗" : "◌"}
-            </text>
-          </Show>
+          <box flexDirection="row" gap={2} minWidth={0} flexShrink={0}>
+            <Show when={terminal().width >= 48}>
+              <text fg={status() === "connected" ? colors.mint : status() === "error" ? colors.red : colors.peach} wrapMode="none" flexShrink={0}>
+                {status() === "connected" ? "● connected" : status() === "error" ? "● error" : "◌ connecting"}
+              </text>
+            </Show>
+            <Show when={terminal().width < 48}>
+              <text fg={status() === "connected" ? colors.mint : status() === "error" ? colors.red : colors.peach} wrapMode="none" flexShrink={0}>
+                {status() === "connected" ? "●" : status() === "error" ? "✗" : "◌"}
+              </text>
+            </Show>
+          </box>
         </box>
       </box>
 
       <box flexDirection="row" gap={1} flexGrow={1} minWidth={0} minHeight={0} width="100%" overflow="hidden">
         <Show when={sidebarVisible()}>
-        <box flexDirection="column" backgroundColor={colors.panel} padding={1} width={32} minWidth={28} height="100%" minHeight={0} flexShrink={0} gap={1} overflow="hidden">
+        <box flexDirection="column" backgroundColor={colors.panel} border={["right"]} borderColor={colors.rule} padding={1} width={sidebarMetrics().sidebarWidth} minWidth={scaledCells(28)} height="100%" minHeight={0} flexShrink={0} gap={1} overflow="hidden">
           <box flexDirection="column" gap={0} flexShrink={0} onMouseDown={() => { setCatMenuOpen((open) => !open); setCatMenuIndex(0); setCatExpressionPicker(false); }}>
-            <CatPortrait
-              height={terminal().height > 22 ? (terminal().height > 32 ? 12 : Math.max(6, terminal().height - 22)) : 6}
-              expression={catProfile().selectedExpression as CatExpressionId}
-              mood={catMood()}
-              frame={catFrame()}
-              animated={catProfile().animationsEnabled}
-            />
+            <box borderStyle="single" borderColor={colors.rule} padding={1} alignSelf="center" overflow="hidden">
+              <CatPortrait
+                height={sidebarMetrics().catHeight}
+                expression={catProfile().selectedExpression as CatExpressionId}
+                mood={catMood()}
+                frame={catFrame()}
+                animated={catProfile().animationsEnabled}
+              />
+            </box>
             <text fg={colors.pink} textAlign="center">MINT THE CAT</text>
             <text fg={colors.muted} textAlign="center">click or press F2 · /cat</text>
           </box>
           <text fg={colors.muted} width="100%" minWidth={0} flexShrink={0} wrapMode="none" truncate={true}>{catProfile().pets} pets · {catProfile().treats} treats</text>
           <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0}>
-          <Show when={session()}>
-            <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>────────────────</text>
-            <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none" truncate={true}>SESSION</text>
+            <Show when={session()}>
+              <box border={["bottom"]} borderColor={colors.rule} width="100%" height={1} minHeight={1} />
+              <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none" truncate={true}>SESSION</text>
+              <text
+                fg={colors.text}
+                width="100%"
+                minWidth={0}
+                wrapMode="none"
+                truncate={true}
+                onMouseUp={(e) => { e.stopPropagation(); openRenamePopup(); }}
+              >
+                {getSessionTitle()}
+              </text>
+              <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>#{session()}</text>
+            </Show>
+            <Show when={!session()}>
+              <box border={["bottom"]} borderColor={colors.rule} width="100%" height={1} minHeight={1} />
+              <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none" truncate={true}>SESSION</text>
+              <text fg={colors.text} width="100%" minWidth={0} wrapMode="none" truncate={true}>{draftSessionTitle() || "new session"}</text>
+              <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>draft · saved on first message</text>
+            </Show>
+            <box border={["bottom"]} borderColor={colors.rule} width="100%" height={1} minHeight={1} />
+            <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none" truncate={true}>MODEL</text>
             <text
-              fg={colors.text}
+              fg={colors.muted}
               width="100%"
               minWidth={0}
               wrapMode="none"
               truncate={true}
-              onMouseUp={(e) => { e.stopPropagation(); openRenamePopup(); }}
+              onMouseUp={(e) => { e.stopPropagation(); openModelPicker(); }}
             >
-              {getSessionTitle()}
+              {model() || "not selected"}
             </text>
-            <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>#{session()}</text>
-          </Show>
-          <Show when={!session()}>
-            <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>────────────────</text>
-            <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none" truncate={true}>SESSION</text>
-            <text fg={colors.text} width="100%" minWidth={0} wrapMode="none" truncate={true}>{draftSessionTitle() || "new session"}</text>
-            <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>draft · saved on first message</text>
-          </Show>
-          <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>────────────────</text>
-          <text fg={colors.mint} width="100%" minWidth={0} wrapMode="none" truncate={true}>MODEL</text>
-          <text
-            fg={colors.text}
-            width="100%"
-            minWidth={0}
-            wrapMode="none"
-            truncate={true}
-            onMouseUp={(e) => { e.stopPropagation(); openModelPicker(); }}
-          >
-            {model() || "not selected"}
-          </text>
-          <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>────────────────</text>
-          <text fg={colors.peach} width="100%" minWidth={0} wrapMode="none" truncate={true}>STATUS</text>
-          <text
-            fg={colors.text}
-            width="100%"
-            minWidth={0}
-            wrapMode="none"
-            truncate={true}
-            onMouseUp={(e) => { e.stopPropagation(); openConnectPopup(); }}
-          >
-            {notice()}
-          </text>
+            <box border={["bottom"]} borderColor={colors.rule} width="100%" height={1} minHeight={1} />
+            <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none" truncate={true}>STATUS</text>
+            <text
+              fg={status() === "connected" ? colors.mint : status() === "error" ? colors.red : colors.peach}
+              width="100%"
+              minWidth={0}
+              wrapMode="none"
+              truncate={true}
+              onMouseUp={(e) => { e.stopPropagation(); openConnectPopup(); }}
+            >
+              {(status() === "connected" ? "● " : status() === "error" ? "● " : "◌ ") + notice()}
+            </text>
+          </box>
         </box>
-      </box>
       </Show>
 
-        <box flexGrow={1} minWidth={0} minHeight={0} width="100%" flexDirection="column" backgroundColor={colors.panel} padding={1} gap={1} overflow="hidden">
-          <box flexDirection="row" justifyContent="space-between" width="100%" minWidth={0} flexShrink={0} overflow="hidden">
+        <box flexGrow={1} minWidth={0} minHeight={0} width="100%" flexDirection="column" backgroundColor={colors.bg} paddingTop={1} paddingLeft={1} paddingRight={1} paddingBottom={0} gap={1} overflow="hidden">
+          <box flexDirection="row" justifyContent="space-between" width="100%" minWidth={0} flexShrink={0} overflow="hidden" border={["bottom"]} borderColor={colors.rule}>
             <text fg={colors.lavender} wrapMode="none">✧ chat ✧</text>
             <Show when={!sidebarVisible()}>
               <box flexDirection="row" gap={1} flexShrink={0}>
@@ -2061,23 +2122,49 @@ No file has been changed. Review this preview, then type /apply to approve or /r
             <For each={messages()}>
               {(message) => (
                 <box flexDirection="column" gap={0} width="100%" minWidth={0}>
-                  <text fg={message.role === "user" ? colors.mint : message.role === "system" ? colors.muted : colors.pink}>
-                    {message.role === "user" ? "you ❯" : "mint ♡ · answer"}
-                  </text>
-                  <box flexDirection="column" gap={0} width="100%" minWidth={0}>
-                    {message.content
-                      ? parseMessageSegments(message.content).map((seg) => renderSegment(seg, colors))
-                      : busy()
-                      ? <text fg={colors.peach} wrapMode="word" width="100%">Waiting for the response…</text>
-                      : null
-                    }
-                  </box>
+                  {message.kind === "tool" ? (
+                    <box flexDirection="row" gap={1} width="100%" minWidth={0}>
+                      <text fg={colors.peach} wrapMode="none" flexShrink={0}>·</text>
+                      <text fg={colors.peach} wrapMode="none" flexShrink={0}>{message.meta?.name ?? ""}</text>
+                      <Show when={message.meta?.args}>
+                        <text fg={colors.lavender} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.meta!.args}</text>
+                      </Show>
+                    </box>
+                  ) : message.kind === "result" ? (
+                    <box flexDirection="row" gap={1} width="100%" minWidth={0} paddingLeft={1}>
+                      <text fg={colors.muted} wrapMode="none" flexShrink={0}>↳</text>
+                      <text fg={colors.muted} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.content}</text>
+                    </box>
+                  ) : message.kind === "proposal" ? (
+                    <box flexDirection="row" gap={1} width="100%" minWidth={0}>
+                      <text fg={colors.mint} wrapMode="none" flexShrink={0}>✦</text>
+                      <text fg={colors.pink} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.content}</text>
+                    </box>
+                  ) : message.kind === "approval" ? (
+                    <box flexDirection="row" gap={1} width="100%" minWidth={0}>
+                      <text fg={colors.peach} wrapMode="none" flexShrink={0}>·</text>
+                      <text fg={colors.peach} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.content}</text>
+                    </box>
+                  ) : (
+                    <>
+                      <text fg={message.role === "user" ? colors.mint : message.role === "system" ? colors.muted : colors.pink}>
+                        {message.role === "user" ? "you ❯" : "mint ♡ · answer"}
+                      </text>
+                      <box flexDirection="column" gap={0} width="100%" minWidth={0}>
+                        {message.content
+                          ? parseMessageSegments(message.content).map((seg) => renderSegment(seg, colors, markdownStyle()))                          : busy()
+                          ? <text fg={colors.peach} wrapMode="word" width="100%">Waiting for the response…</text>
+                          : null
+                        }
+                      </box>
+                    </>
+                  )}
                 </box>
               )}
             </For>
           </scrollbox>
           <Show when={commandSuggestions().length > 0 && !modelPickerOpen()}>
-            <box backgroundColor={colors.bg} borderStyle="rounded" borderColor={colors.lavender} padding={1} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden" onMouseScroll={(e) => { e.stopPropagation(); }}>
+            <box backgroundColor={colors.bg} borderStyle="single" borderColor={colors.lavender} padding={1} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden" onMouseScroll={(e) => { e.stopPropagation(); }}>
               <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
                 <text fg={colors.lavender} wrapMode="none" width="100%" minWidth={0} truncate={true}>{commandPaletteHeader()}</text>
               </box>
@@ -2122,25 +2209,26 @@ No file has been changed. Review this preview, then type /apply to approve or /r
               }}</For>
             </box>
           </Show>
-          <box backgroundColor={colors.bg} padding={1} flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
-            <text fg={colors.mint} width="100%" minWidth={0} wrapMode="char">❯ {input().slice(0, cursorPos())}▌{input().slice(cursorPos())}</text>
-              <box flexDirection="row" gap={2} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
-              <text fg={mode() === "plan" ? colors.lavender : colors.mint} wrapMode="none">
-                {mode() === "plan" ? "◆ PLAN MODE" : "◆ BUILD MODE"}
+          <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
+            <box backgroundColor={colors.bg} border={["top"]} borderColor={colors.rule} paddingLeft={1} paddingRight={1} paddingBottom={0} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
+              <text fg={colors.mint} width="100%" minWidth={0} wrapMode="char">❯ {input().slice(0, cursorPos())}<span style={{ fg: colors.bg, bg: colors.mint }}>{cursorGlyph()}</span>{input().slice(cursorPos() + cursorAdvance())}</text>
+              <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>
+                {terminal().width >= 60
+                  ? `${mode() === "plan" ? "Plan" : "Build"} · ${displayModelName(model() || configuredModel || "")} · ${effort()}`
+                  : `${mode() === "plan" ? "Plan" : "Build"} · ${effort()}`}
               </text>
-              <text fg={colors.muted} wrapMode="none">Shift+Tab to toggle</text>
             </box>
-            <Show when={busy()}>
-              <box flexDirection="row" gap={1} width="100%" minWidth={0} flexShrink={0} overflow="hidden" paddingLeft={1}>
-                <RunCatIndicator busy={true} speed={runCatSpeed()} />
+            <box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1} width="100%" minWidth={0} flexShrink={0} overflow="hidden" paddingLeft={1} paddingRight={1}>
+              <text fg={colors.muted} wrapMode="none" flexShrink={1} truncate={true}>{footerLabel()}</text>
+              <box flexDirection="row" gap={1} flexShrink={0} alignItems="center">
+                <Show when={showTokenUsage()}>
+                  <text fg={colors.muted} wrapMode="none" flexShrink={0}>{tokenUsageLabel()}</text>
+                </Show>
               </box>
-            </Show>
+            </box>
           </box>
         </box>
       </box>
-      <Show when={terminal().height >= 24 && commandSuggestions().length === 0}>
-        <text fg={colors.muted} width="100%" minWidth={0} flexShrink={0} wrapMode="none" truncate={true}>{footerText()}</text>
-      </Show>
 
       {/* Top-right toast notification */}
       <Show when={toast() !== null}>
@@ -2150,13 +2238,13 @@ No file has been changed. Review this preview, then type /apply to approve or /r
           right={2}
           zIndex={50}
           backgroundColor={colors.panel}
-          borderStyle="rounded"
+          borderStyle="single"
           borderColor={colors.mint}
           paddingLeft={1}
           paddingRight={1}
           onMouseUp={(e) => { e.stopPropagation(); setToast(null); if (toastTimer) clearTimeout(toastTimer); }}
         >
-          <text fg={colors.mint} wrapMode="none" truncate={true} width={40}>{toast()}</text>
+          <text fg={colors.mint} wrapMode="none" truncate={true} width={scaledCells(40)}>{toast()}</text>
         </box>
       </Show>
 
@@ -2165,8 +2253,8 @@ No file has been changed. Review this preview, then type /apply to approve or /r
         <ModalFrame
           onClose={closeConnectPopup}
           title="✿ CONNECT NVIDIA"
-          width={72}
-          minWidth={40}
+          width={scaledCells(72)}
+          minWidth={scaledCells(40)}
           borderColor={colors.pink}
         >
         <box flexDirection="column" gap={1} width="100%">
@@ -2260,7 +2348,7 @@ No file has been changed. Review this preview, then type /apply to approve or /r
 
       {/* Model picker (inline, same slot as command palette) */}
       <Show when={modelPickerOpen()}>
-        <box backgroundColor={colors.bg} borderStyle="rounded" borderColor={colors.lavender} padding={1} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden" onMouseScroll={(e) => handleWheel(e, (d) => setModelPickerIndex(movePickerIndex(modelPickerIndex(), d, modelPickerSuggestions().length)))} >
+        <box backgroundColor={colors.bg} borderStyle="single" borderColor={colors.lavender} padding={1} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden" onMouseScroll={(e) => handleWheel(e, (d) => setModelPickerIndex(movePickerIndex(modelPickerIndex(), d, modelPickerSuggestions().length)))} >
           <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
             <text fg={colors.lavender} wrapMode="none" width="100%" minWidth={0} truncate={true}>{modelPickerHeader()}</text>
           </box>
@@ -2333,8 +2421,8 @@ No file has been changed. Review this preview, then type /apply to approve or /r
         <ModalFrame
           onClose={closeRenamePopup}
           title="✎ RENAME SESSION"
-          width={60}
-          minWidth={30}
+          width={scaledCells(60)}
+          minWidth={scaledCells(30)}
           borderColor={colors.pink}
         >
         <box flexDirection="row" gap={1} width="100%" minWidth={0}>
@@ -2376,8 +2464,8 @@ No file has been changed. Review this preview, then type /apply to approve or /r
         <ModalFrame
           onClose={closeSessionPicker}
           title={`✧ SESSIONS · ${filteredSessions().length}${sessionPickerQuery() ? ` · filter "${sessionPickerQuery()}"▌` : ""}`}
-          width={80}
-          minWidth={50}
+          width={scaledCells(80)}
+          minWidth={scaledCells(50)}
           borderColor={colors.lavender}
           onMouseScroll={(e) => handleWheel(e, (d) => setSessionPickerIndex(movePickerIndex(sessionPickerIndex(), d, filteredSessions().length)))}
         >
@@ -2425,19 +2513,21 @@ No file has been changed. Review this preview, then type /apply to approve or /r
       <Show when={catMenuOpen()}>
         <ModalFrame
           onClose={() => { setCatMenuOpen(false); setCatExpressionPicker(false); }}
-          title="✿ MINT THE CAT"
+          title="FELIS TERMINALIS"
           width={terminal().width >= 80 ? 76 : 56}
           minWidth={36}
-          borderColor={colors.pink}
+          borderColor={colors.rule}
         >
         <box flexDirection={terminal().width >= 80 ? "row" : "column"} gap={2} width="100%" minWidth={0} alignItems={terminal().width >= 80 ? "flex-start" : "center"}>
-          <CatPortrait
-            height={terminal().width >= 80 ? Math.min(24, terminal().height - 8) : 18}
-            expression={catProfile().selectedExpression as CatExpressionId}
-            mood={catMood()}
-            frame={catFrame()}
-            animated={catProfile().animationsEnabled}
-          />
+          <box borderStyle="single" borderColor={colors.rule} padding={0} overflow="hidden">
+            <CatPortrait
+              height={terminal().width >= 80 ? Math.min(24, terminal().height - 8) : 18}
+              expression={catProfile().selectedExpression as CatExpressionId}
+              mood={catMood()}
+              frame={catFrame()}
+              animated={catProfile().animationsEnabled}
+            />
+          </box>
           <box flexDirection="column" gap={1} width="100%" minWidth={0} flexGrow={1}>
             <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true} textAlign={terminal().width >= 80 ? "left" : "center"}>{catProfile().pets} pets · {catProfile().treats} treats</text>
             <Show when={catExpressionPicker()}>

@@ -4,6 +4,8 @@ export type NvidiaModel = {
   owned_by?: string;
 };
 
+import { normalizeTokenUsage, type TokenUsage } from "./usage";
+
 export type ToolCall = { id: string; type: "function"; function: { name: string; arguments: string } };
 export type ChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
@@ -19,7 +21,7 @@ export type FunctionTool = {
     parameters: { type: "object"; properties: Record<string, unknown>; required?: string[]; additionalProperties?: boolean };
   };
 };
-export type ChatStreamEvent = { type: "content"; content: string } | { type: "tool_calls"; toolCalls: ToolCall[] };
+export type ChatStreamEvent = { type: "content"; content: string } | { type: "tool_calls"; toolCalls: ToolCall[] } | { type: "usage"; usage: TokenUsage };
 
 type ModelsResponse = { data?: NvidiaModel[] };
 type ChatChunk = {
@@ -32,6 +34,7 @@ type ChatChunk = {
     finish_reason?: string | null;
   }>;
   error?: { message?: string; detail?: string } | string;
+  usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | null;
 };
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -60,7 +63,7 @@ export class NvidiaClient {
     tools: FunctionTool[] = [],
     signal?: AbortSignal,
   ): AsyncGenerator<ChatStreamEvent> {
-    const body: Record<string, unknown> = { model, messages, stream: true, temperature: 0.2 };
+    const body: Record<string, unknown> = { model, messages, stream: true, temperature: 0.2, stream_options: { include_usage: true } };
     if (tools.length) body.tools = tools;
     const response = await this.fetchImpl(`${this.baseUrl}/chat/completions`, {
       method: "POST",
@@ -93,7 +96,10 @@ export class NvidiaClient {
       }
       const delta = chunk.choices?.[0]?.delta;
       const events: ChatStreamEvent[] = [];
-      // Only user-facing content is rendered. Reasoning is intentionally not surfaced as the answer.
+      // Provider-reported token usage arrives in the final chunk (choices empty).
+const usage = normalizeTokenUsage(chunk.usage);
+if (usage) events.push({ type: "usage", usage });
+// Only user-facing content is rendered. Reasoning is intentionally not surfaced as the answer.
       if (typeof delta?.content === "string" && delta.content.length) events.push({ type: "content", content: delta.content });
       for (const part of delta?.tool_calls ?? []) {
         const existing = calls.get(part.index) ?? { id: "", type: "function" as const, function: { name: "", arguments: "" } };

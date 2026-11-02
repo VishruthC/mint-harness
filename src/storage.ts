@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { TokenUsage } from "./usage";
 
 export type StoredMessage = {
   role: "system" | "user" | "assistant";
@@ -21,6 +22,9 @@ export type Session = {
   model: string;
   created_at: string;
   updated_at: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
 };
 
 function defaultDbPath() {
@@ -62,6 +66,17 @@ export class SessionStore {
       );
       INSERT OR IGNORE INTO cat_profile (id) VALUES (1);
     `);
+    const sessionColumns = new Set(
+      (this.db.query("PRAGMA table_info(sessions)").all() as Array<{ name: string }>).map((column) => column.name),
+    );
+    const additions: Array<[string, string]> = [
+      ["prompt_tokens", "INTEGER NOT NULL DEFAULT 0"],
+      ["completion_tokens", "INTEGER NOT NULL DEFAULT 0"],
+      ["total_tokens", "INTEGER NOT NULL DEFAULT 0"],
+    ];
+    for (const [name, definition] of additions) {
+      if (!sessionColumns.has(name)) this.db.exec(`ALTER TABLE sessions ADD COLUMN ${name} ${definition}`);
+    }
   }
 
   createSession(model = "", title = "New session") {
@@ -105,6 +120,25 @@ export class SessionStore {
 
   updateModel(sessionId: string, model: string) {
     this.db.query("UPDATE sessions SET model = ?, updated_at = ? WHERE id = ?").run(model, new Date().toISOString(), sessionId);
+  }
+
+  getSessionTokenUsage(sessionId: string): TokenUsage {
+    const row = this.db.query("SELECT prompt_tokens, completion_tokens, total_tokens FROM sessions WHERE id = ?").get(sessionId) as {
+      prompt_tokens: number;
+      completion_tokens: number;
+      total_tokens: number;
+    } | null;
+    if (!row) return { prompt: 0, completion: 0, total: 0 };
+    return {
+      prompt: row.prompt_tokens ?? 0,
+      completion: row.completion_tokens ?? 0,
+      total: row.total_tokens ?? 0,
+    };
+  }
+
+  addSessionTokenUsage(sessionId: string, usage: TokenUsage) {
+    this.db.query("UPDATE sessions SET prompt_tokens = prompt_tokens + ?, completion_tokens = completion_tokens + ?, total_tokens = total_tokens + ? WHERE id = ?")
+      .run(Math.max(0, Math.floor(usage.prompt)), Math.max(0, Math.floor(usage.completion)), Math.max(0, Math.floor(usage.total)), sessionId);
   }
 
   deleteSession(sessionId: string) {

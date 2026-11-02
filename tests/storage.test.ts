@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -87,4 +88,45 @@ describe("SessionStore", () => {
     store.renameSession(session.id, longTitle);
     expect(store.getSession(session.id)?.title.length).toBe(64);
   });
+});
+test("tracks token usage per session", () => {
+  directory = mkdtempSync(join(tmpdir(), "mint-test-"));
+  store = new SessionStore(join(directory, "test.sqlite"));
+  const first = store.createSession("model-a");
+  const second = store.createSession("model-b");
+  store.addSessionTokenUsage(first.id, { prompt: 5, completion: 3, total: 8 });
+  store.addSessionTokenUsage(first.id, { prompt: 2, completion: 1, total: 3 });
+  expect(store.getSessionTokenUsage(first.id)).toEqual({ prompt: 7, completion: 4, total: 11 });
+  expect(store.getSessionTokenUsage(second.id)).toEqual({ prompt: 0, completion: 0, total: 0 });
+});
+
+test("token usage persists across reopen", () => {
+  directory = mkdtempSync(join(tmpdir(), "mint-test-"));
+  const path = join(directory, "test.sqlite");
+  store = new SessionStore(path);
+  const session = store.createSession("model-a");
+  store.addSessionTokenUsage(session.id, { prompt: 9, completion: 4, total: 13 });
+  store.close();
+  store = undefined;
+  store = new SessionStore(path);
+  expect(store.getSessionTokenUsage(session.id)).toEqual({ prompt: 9, completion: 4, total: 13 });
+});
+
+test("migrates legacy databases with token columns", () => {
+  directory = mkdtempSync(join(tmpdir(), "mint-test-"));
+  const path = join(directory, "test.sqlite");
+  const db = new Database(path);
+  db.exec(`
+    CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+    CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
+    CREATE TABLE cat_profile (id INTEGER PRIMARY KEY CHECK (id = 1), pets INTEGER NOT NULL DEFAULT 0, treats INTEGER NOT NULL DEFAULT 0, selected_expression TEXT NOT NULL DEFAULT 'idle', animations_enabled INTEGER NOT NULL DEFAULT 1, unlocked_expressions TEXT NOT NULL DEFAULT '["idle","happy"]');
+    INSERT INTO cat_profile (id) VALUES (1);
+  `);
+  db.query("INSERT INTO sessions (id, title, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run("legacy", "title", "model-a", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+  db.close();
+
+  store = new SessionStore(path);
+  expect(store.getSessionTokenUsage("legacy")).toEqual({ prompt: 0, completion: 0, total: 0 });
+  store.addSessionTokenUsage("legacy", { prompt: 1, completion: 1, total: 2 });
+  expect(store.getSessionTokenUsage("legacy")).toEqual({ prompt: 1, completion: 1, total: 2 });
 });
