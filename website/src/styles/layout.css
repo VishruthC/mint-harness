@@ -278,6 +278,25 @@
   background-image: radial-gradient(circle, rgba(26, 24, 34, 0.16) 1px, transparent 1px);
   background-size: 28px 28px;
   mask-image: linear-gradient(to bottom, transparent 4%, black 22%, black 78%, transparent 98%);
+  transition: opacity 300ms var(--ease-out);
+}
+
+.hero-field-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 300ms var(--ease-out);
+}
+
+.hero-field.is-dots-ready .hero-field-grid {
+  opacity: 0;
+}
+
+.hero-field.is-dots-ready .hero-field-canvas {
+  opacity: 1;
 }
 
 .hero-field-label {
