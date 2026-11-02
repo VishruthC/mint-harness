@@ -1,7 +1,7 @@
 import { $ } from "../lib/dom";
 
 const SPACING = 28;
-const HOVER_RADIUS = 15;
+const HOVER_RADIUS = 88;
 const GATHER = 0.2;
 
 export function initHeroDots(): void {
@@ -17,7 +17,7 @@ export function initHeroDots(): void {
 
   let width = 0;
   let height = 0;
-  const dots: { x: number; y: number }[] = [];
+  const dots: { x: number; y: number; intensity: number }[] = [];
 
   const rebuildDots = (): void => {
     dots.length = 0;
@@ -28,6 +28,7 @@ export function initHeroDots(): void {
         dots.push({
           x: (col + 0.5) * SPACING,
           y: (row + 0.5) * SPACING,
+          intensity: 0,
         });
       }
     }
@@ -62,10 +63,9 @@ export function initHeroDots(): void {
     context.clearRect(0, 0, width, height);
 
     for (const dot of dots) {
-      let x = dot.x;
-      let y = dot.y;
-      let alpha = 0.16;
-      let radius = 1.2;
+      let target = 0;
+      let pullX = 0;
+      let pullY = 0;
 
       if (mouse.active) {
         const dx = mouse.x - dot.x;
@@ -73,15 +73,27 @@ export function initHeroDots(): void {
         const distance = Math.hypot(dx, dy);
 
         if (distance <= HOVER_RADIUS) {
-          const t = 1 - distance / HOVER_RADIUS;
-          const pull = t * SPACING * GATHER;
+          target = 1 - distance / HOVER_RADIUS;
           const length = distance || 1;
-          x += (dx / length) * pull;
-          y += (dy / length) * pull;
-          alpha = 0.16 + t * 0.72;
-          radius = 1.2 + t * 1.8;
+          const pull = target * SPACING * GATHER;
+          pullX = (dx / length) * pull;
+          pullY = (dy / length) * pull;
         }
       }
+
+      // Fast attack, slow release for a fluid feel.
+      const rate = target > dot.intensity ? 0.96 : 0.08;
+      dot.intensity += (target - dot.intensity) * rate;
+      if (dot.intensity < 0.001) dot.intensity = 0;
+
+      const t = dot.intensity;
+      const x = dot.x + pullX * t;
+      const y = dot.y + pullY * t;
+      const alpha = 0.28 + t * 0.72;
+      const radius = 1.35 + t * 2.45;
+
+      context.shadowBlur = t > 0.01 ? 10 + t * 18 : 0;
+      context.shadowColor = `rgba(166, 227, 161, ${0.4 + t * 0.6})`;
 
       context.beginPath();
       context.arc(x, y, radius, 0, Math.PI * 2);
