@@ -9,6 +9,7 @@ const EnvSchema = z.object({
   MINT_MAX_TOOL_ROUNDS: z.coerce.number().int().positive().default(DEFAULT_AGENT_LOOP_LIMITS.maxToolRounds),
   MINT_MAX_TOOL_CALLS_PER_TURN: z.coerce.number().int().positive().default(DEFAULT_AGENT_LOOP_LIMITS.maxToolCallsPerTurn),
   MINT_EFFORT: z.enum(["low", "medium", "high", "max"]).optional().default("max"),
+  MINT_AUTO_APPLY: z.enum(["manual", "auto"]).default("manual"),
 });
 
 export type MintConfig = {
@@ -18,6 +19,7 @@ export type MintConfig = {
   maxToolRounds: number;
   maxToolCallsPerTurn: number;
   effort: "low" | "medium" | "high" | "max";
+  autoApply: "manual" | "auto";
 };
 
 function readDotEnv(path = ".env"): Record<string, string> {
@@ -55,6 +57,7 @@ export function loadConfig(env?: Record<string, string | undefined>): MintConfig
     MINT_MAX_TOOL_ROUNDS: source.MINT_MAX_TOOL_ROUNDS ?? String(DEFAULT_AGENT_LOOP_LIMITS.maxToolRounds),
     MINT_MAX_TOOL_CALLS_PER_TURN: source.MINT_MAX_TOOL_CALLS_PER_TURN ?? String(DEFAULT_AGENT_LOOP_LIMITS.maxToolCallsPerTurn),
     MINT_EFFORT: source.MINT_EFFORT ?? "max",
+    MINT_AUTO_APPLY: source.MINT_AUTO_APPLY ?? "manual",
   });
 
   if (!parsed.success) {
@@ -68,6 +71,7 @@ export function loadConfig(env?: Record<string, string | undefined>): MintConfig
     maxToolRounds: parsed.data.MINT_MAX_TOOL_ROUNDS,
     maxToolCallsPerTurn: parsed.data.MINT_MAX_TOOL_CALLS_PER_TURN,
     effort: parsed.data.MINT_EFFORT,
+    autoApply: parsed.data.MINT_AUTO_APPLY,
   };
 }
 
@@ -78,6 +82,7 @@ const MINT_KEYS = [
   "MINT_MAX_TOOL_ROUNDS",
   "MINT_MAX_TOOL_CALLS_PER_TURN",
   "MINT_EFFORT",
+  "MINT_AUTO_APPLY",
 ] as const;
 
 function writeDotEnvAtomic(
@@ -120,6 +125,7 @@ export function writeDotEnv(config: MintConfig, path = ".env"): void {
       `MINT_MAX_TOOL_ROUNDS=${config.maxToolRounds}`,
       `MINT_MAX_TOOL_CALLS_PER_TURN=${config.maxToolCallsPerTurn}`,
       `MINT_EFFORT=${config.effort}`,
+      `MINT_AUTO_APPLY=${config.autoApply}`,
     ].filter(Boolean);
 
     return [...otherLines, ...newLines];
@@ -138,5 +144,18 @@ export function updateDotEnvModel(model: string, path = ".env"): void {
       return keyMatch && keyMatch[1] !== "NVIDIA_MODEL";
     });
     return [...otherLines, `NVIDIA_MODEL="${model.replace(/"/g, '\\"')}"`];
+  });
+}
+
+export function updateDotEnvAutoApply(mode: "manual" | "auto", path = ".env"): void {
+  if (!["manual", "auto"].includes(mode)) throw new Error("Invalid auto-apply mode");
+  writeDotEnvAtomic(path, (existingLines) => {
+    const otherLines = existingLines.filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) return true;
+      const keyMatch = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/);
+      return keyMatch && keyMatch[1] !== "MINT_AUTO_APPLY";
+    });
+    return [...otherLines, `MINT_AUTO_APPLY=${mode}`];
   });
 }

@@ -68,6 +68,7 @@ describe("writeDotEnv", () => {
       maxToolRounds: 10,
       maxToolCallsPerTurn: 20,
       effort: "max",
+      autoApply: "manual",
     };
     writeDotEnv(config, envPath);
     const content = readFileSync(envPath, "utf8");
@@ -90,6 +91,7 @@ describe("writeDotEnv", () => {
       maxToolRounds: 12,
       maxToolCallsPerTurn: 24,
       effort: "max",
+      autoApply: "manual",
     };
     writeDotEnv(config, envPath);
     const content = readFileSync(envPath, "utf8");
@@ -109,6 +111,7 @@ describe("writeDotEnv", () => {
       maxToolRounds: 12,
       maxToolCallsPerTurn: 24,
       effort: "max",
+      autoApply: "manual",
     };
     writeDotEnv(config, envPath);
     const content = readFileSync(envPath, "utf8");

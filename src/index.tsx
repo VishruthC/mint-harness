@@ -1,6 +1,6 @@
 import { render, useKeyboard, useRenderer, useTerminalDimensions, usePaste, useSelectionHandler } from "@opentui/solid";
 import { For, Show, createMemo, createSignal, createEffect, onCleanup, onMount, JSX } from "solid-js";
-import { loadConfig, writeDotEnv, updateDotEnvModel, type MintConfig } from "./config";
+import { loadConfig, writeDotEnv, updateDotEnvModel, updateDotEnvAutoApply, type MintConfig } from "./config";
 import { AgentTurnBudget, formatAgentLimits, formatLimitMessage, RepeatedCallGuard } from "./agent-loop";
 import { NvidiaClient, type ChatMessage, type NvidiaModel, type ToolCall } from "./nvidia";
 import { buildSystemPrompt, executeModelTool, getCapabilities, getModelTools } from "./agent-tools";
@@ -102,7 +102,7 @@ function detectGitBranch(root: string): string {
   }
 }
 
-type ViewMessage = { role: "user" | "assistant" | "system"; content: string; kind?: "text" | "tool" | "result" | "proposal" | "approval" | "error"; meta?: Record<string, string> };
+type ViewMessage = { role: "user" | "assistant" | "system"; content: string; kind?: "text" | "tool" | "result" | "proposal" | "approval" | "error" | "mode"; meta?: Record<string, string> };
 
 // Message segment parsing lives in src/message-segments.ts so it can be unit-tested
 // without pulling in the Solid/OpenTUI renderer.
@@ -383,8 +383,16 @@ function App() {
     if (busy() || modeLocked()) return;
     setMode((m) => {
       const next = m === "plan" ? "build" : "plan";
+      modeTransition = { from: m, to: next };
       setHistory((old) => [systemMessage(next), ...old.filter((message) => message.role !== "system")]);
       setNotice(next === "plan" ? "plan mode: read-only planning" : "build mode: full tools enabled");
+      // Add visible mode transition message
+      setMessages((old) => [...old, {
+        role: "system",
+        content: `mode switched · ${next === "plan" ? "Plan (read-only)" : "Build (editing enabled)"}`,
+        kind: "mode",
+        meta: { mode: next },
+      }]);
       return next;
     });
   };
@@ -417,7 +425,22 @@ function App() {
   let workspaceTools: WorkspaceTools | undefined;
   let terminalTools: ApprovedTerminal | undefined;
   let agentLimits = { maxToolRounds: 12, maxToolCallsPerTurn: 24 };
-  const systemMessage = (m: "plan" | "build" = mode()): ChatMessage => ({ role: "system", content: buildSystemPrompt(Boolean(workspaceTools), workspaceTools?.root, agentLimits, m) });
+  let pendingProposalId: string | undefined;
+  let pendingCommandId: string | undefined;
+  let modeTransition: { from: "plan" | "build"; to: "plan" | "build" } | undefined;
+  let lastApproval: { kind: "file" | "command"; id: string; status: string; automatic?: boolean } | undefined;
+  let autoApply: "manual" | "auto" = "manual";
+  
+  const systemMessage = (m: "plan" | "build" = mode()): ChatMessage => ({
+    role: "system",
+    content: buildSystemPrompt(
+      Boolean(workspaceTools),
+      workspaceTools?.root,
+      agentLimits,
+      m,
+      { modeTransition, pendingProposalId, pendingCommandId, lastApproval, autoApply }
+    )
+  });
   const [history, setHistory] = createSignal<ChatMessage[]>([systemMessage()]);
   const store = new SessionStore();
   const [catProfile, setCatProfile] = createSignal<CatProfile>(store.getCatProfile());
@@ -518,8 +541,6 @@ function App() {
     setNotice(action === "pet" ? "the cat is purring ♡" : "treat accepted 🍪");
   };
   let awaitingWritePath: string | undefined;
-  let pendingProposalId: string | undefined;
-  let pendingCommandId: string | undefined;
   void WorkspaceTools.create().then((tools) => {
     workspaceTools = tools;
     terminalTools = new ApprovedTerminal(tools.root);
@@ -654,6 +675,7 @@ const showTokenUsage = () => terminal().width >= 48;
   const footerLabel = () => {
     const parts = [workspaceLabel()];
     if (workspaceBranch() && terminal().width >= 60) parts.push(workspaceBranch());
+    if (autoApply === "auto" && mode() === "build") parts.push("auto-apply:on");
     const full = parts.join(" · ");
     const sidebarChrome = sidebarVisible() ? sidebarMetrics().sidebarWidth + 5 : 4;
     const tokenChrome = showTokenUsage() ? tokenUsageLabel().length + 1 : 0;
@@ -723,6 +745,12 @@ const showTokenUsage = () => terminal().width >= 48;
     setMessages([{ role: "assistant", content: `Fresh session! Send a message to save it. ♡` }]);
     setNotice("draft session ready");
     lastUserPrompt = "";
+    pendingProposalId = undefined;
+    pendingCommandId = undefined;
+    awaitingWritePath = undefined;
+    modeTransition = undefined;
+    lastApproval = undefined;
+    // Note: autoApply persists across sessions
     setSessionTokens({ ...EMPTY_TOKEN_USAGE });
   };
 
@@ -739,6 +767,12 @@ const showTokenUsage = () => terminal().width >= 48;
     setMessages(stored.filter((m) => m.role !== "system"));
     setModel(found.model || model());
     setNotice(`resumed session ${id}`);
+    // Clear transient state on resume
+    pendingProposalId = undefined;
+    pendingCommandId = undefined;
+    awaitingWritePath = undefined;
+    modeTransition = undefined;
+    lastApproval = undefined;
     setSessionTokens(store.getSessionTokenUsage(id));
   };
 
@@ -947,6 +981,7 @@ const showTokenUsage = () => terminal().width >= 48;
         maxToolRounds: agentLimits.maxToolRounds,
         maxToolCallsPerTurn: agentLimits.maxToolCallsPerTurn,
         effort: "max",
+        autoApply: "manual",
       };
       writeDotEnv(mergedConfig);
 
@@ -1387,7 +1422,25 @@ const showTokenUsage = () => terminal().width >= 48;
           totalLines: String(result.proposal.totalLines ?? 0),
         },
       }]);
-      setNotice(`review proposal ${result.proposal.id}`);
+      
+      // Auto-apply if enabled and in build mode
+      if (autoApply === "auto" && mode() === "build") {
+        const applyResult = await workspaceTools.applyWrite(result.proposal.id);
+        if (applyResult.ok) {
+          pendingProposalId = undefined;
+          lastApproval = { kind: "file", id: result.proposal.id, status: "applied", automatic: true };
+          setMessages((old) => old.map((m) => (m.meta?.id === result.proposal.id ? { ...m, meta: { ...m.meta, status: "applied automatically" } } : m)));
+          setMessages((old) => [...old, { role: "assistant", content: `PROPOSAL AUTO-APPLIED — ${applyResult.output}` }]);
+          setCatMood("happy");
+          setNotice("approved change applied automatically");
+        } else {
+          setMessages((old) => old.map((m) => (m.meta?.id === result.proposal.id ? { ...m, meta: { ...m.meta, status: "auto-apply failed · awaiting approval" } } : m)));
+          setMessages((old) => [...old, { role: "assistant", content: `Auto-apply failed: ${applyResult.error}. The proposal is still pending — use /apply to approve or /reject to discard.` }]);
+          setNotice("auto-apply failed");
+        }
+      } else {
+        setNotice(`review proposal ${result.proposal.id}`);
+      }
       return;
     }
     if (text === "/apply") {
@@ -1395,13 +1448,14 @@ const showTokenUsage = () => terminal().width >= 48;
         setMessages((old) => [...old, { role: "assistant", content: "There is no pending file change to apply." }]);
         return;
       }
-      const result = await workspaceTools.applyWrite(pendingProposalId);
+      const proposalId = pendingProposalId;
+      const result = await workspaceTools.applyWrite(proposalId);
       if (result.ok) {
-        setMessages((old) => old.map((m) => (m.meta?.id === pendingProposalId ? { ...m, meta: { ...m.meta, status: "applied" } } : m)));
+        setMessages((old) => old.map((m) => (m.meta?.id === proposalId ? { ...m, meta: { ...m.meta, status: "applied" } } : m)));
       }
       setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : `Change not applied: ${result.error}` }]);
-      if (result.ok) { pendingProposalId = undefined; setCatMood("happy"); }
-      else setCatMood("error");
+      if (result.ok) { pendingProposalId = undefined; lastApproval = { kind: "file", id: proposalId, status: "applied" }; setCatMood("happy"); }
+      else { setCatMood("error"); lastApproval = { kind: "file", id: proposalId, status: "failed" }; }
       setNotice(result.ok ? "approved change applied" : "approval failed");
       return;
     }
@@ -1410,11 +1464,59 @@ const showTokenUsage = () => terminal().width >= 48;
         setMessages((old) => [...old, { role: "assistant", content: "There is no pending file change to reject." }]);
         return;
       }
-      const result = workspaceTools.rejectWrite(pendingProposalId);
-      setMessages((old) => old.map((m) => (m.meta?.id === pendingProposalId ? { ...m, meta: { ...m.meta, status: "rejected" } } : m)));
+      const proposalId = pendingProposalId;
+      const result = workspaceTools.rejectWrite(proposalId);
+      setMessages((old) => old.map((m) => (m.meta?.id === proposalId ? { ...m, meta: { ...m.meta, status: "rejected" } } : m)));
       pendingProposalId = undefined;
+      lastApproval = { kind: "file", id: proposalId, status: "rejected" };
       setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : result.error }]);
       setNotice("proposal rejected");
+      return;
+    }
+    if (text === "/approve") {
+      if (!workspaceTools || !pendingProposalId) {
+        setMessages((old) => [...old, { role: "assistant", content: "There is no pending file change to approve." }]);
+        return;
+      }
+      const proposalId = pendingProposalId;
+      const result = await workspaceTools.applyWrite(proposalId);
+      if (result.ok) {
+        setMessages((old) => old.map((m) => (m.meta?.id === proposalId ? { ...m, meta: { ...m.meta, status: "applied" } } : m)));
+      }
+      setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : `Change not applied: ${result.error}` }]);
+      if (result.ok) { pendingProposalId = undefined; lastApproval = { kind: "file", id: proposalId, status: "applied" }; setCatMood("happy"); }
+      else { setCatMood("error"); lastApproval = { kind: "file", id: proposalId, status: "failed" }; }
+      setNotice(result.ok ? "approved change applied" : "approval failed");
+      return;
+    }
+    if (text === "/autoapply" || text.startsWith("/autoapply ")) {
+      const arg = text.slice(11).trim().toLowerCase();
+      if (!arg || arg === "status") {
+        setMessages((old) => [...old, { role: "assistant", content: `Auto-apply: ${autoApply}. Build mode: ${mode()}. ${autoApply === "auto" ? "File proposals will be applied automatically." : "File proposals require manual /apply."}` }]);
+        return;
+      }
+      if (arg === "on") {
+        autoApply = "auto";
+        setMessages((old) => [...old, { role: "assistant", content: "Auto-apply enabled. File proposals will be applied automatically in Build mode." }]);
+        setNotice("auto-apply: on");
+        return;
+      }
+      if (arg === "off") {
+        autoApply = "manual";
+        setMessages((old) => [...old, { role: "assistant", content: "Auto-apply disabled. File proposals require manual /apply." }]);
+        setNotice("auto-apply: off");
+        return;
+      }
+      if (arg === "save") {
+        try {
+          updateDotEnvAutoApply(autoApply);
+          setMessages((old) => [...old, { role: "assistant", content: `Auto-apply setting saved to .env: ${autoApply}` }]);
+        } catch (e) {
+          setMessages((old) => [...old, { role: "assistant", content: `Failed to save: ${e instanceof Error ? e.message : String(e)}` }]);
+        }
+        return;
+      }
+      setMessages((old) => [...old, { role: "assistant", content: "Usage: /autoapply [on|off|status|save]" }]);
       return;
     }
     if (text.startsWith("/propose ")) {
@@ -1510,14 +1612,17 @@ const showTokenUsage = () => terminal().width >= 48;
       setNotice("running approved command…");
       const result = await terminalTools.runApproved(id);
       setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : `Command failed: ${result.error}` }]);
+      lastApproval = { kind: "command", id, status: result.ok ? "completed" : "failed" };
       setNotice(result.ok ? "command completed" : "command failed");
       setCatMood(result.ok ? "zoomies" : "error");
       setBusy(false);
       return;
     }
     if (text === "/reject-command") {
-      if (pendingCommandId && terminalTools) terminalTools.reject(pendingCommandId);
+      const id = pendingCommandId;
+      if (id && terminalTools) terminalTools.reject(id);
       pendingCommandId = undefined;
+      lastApproval = { kind: "command", id: id ?? "", status: "rejected" };
       setMessages((old) => [...old, { role: "assistant", content: "Pending command discarded. Nothing was executed." }]);
       setNotice("command rejected");
       return;
@@ -1529,13 +1634,13 @@ const showTokenUsage = () => terminal().width >= 48;
       return;
     }
     if (text === "/limits") {
-      setMessages((old) => [...old, { role: "assistant", content: formatAgentLimits(agentLimits) }]);
+      setMessages((old) => [...old, { role: "assistant", content: `${formatAgentLimits(agentLimits)}\nAuto-apply: ${autoApply} (${mode() === "build" ? "active" : "inactive in plan mode"})` }]);
       return;
     }
     if (text === "/help") {
       setMessages((old) => [...old, {
         role: "assistant",
-        content: "Commands: /help · /cat · /pet · /feed · /expressions · /expression <id> · /models · /model · /connect · /session · /session new · /session delete <id> · /session rename · /workspace · /project · /capabilities · /limits · /ls [path] · /read <path> · /search <text> · /propose <path> · /apply · /reject · /command <program args> · /run · /reject-command · /cancel · /clear · /quit\n\nFile changes require explicit /apply approval. Terminal commands are restricted, previewed, and run only after explicit /run approval. Web browsing remains unavailable.",
+        content: "Commands: /help · /cat · /pet · /feed · /expressions · /expression <id> · /models · /model · /connect · /session · /session new · /session delete <id> · /session rename · /workspace · /project · /capabilities · /limits · /autoapply [on|off|status|save] · /ls [path] · /read <path> · /search <text> · /propose <path> · /apply · /approve · /reject · /command <program args> · /run · /reject-command · /cancel · /clear · /quit\n\nShortcuts: Ctrl+Y = approve pending proposal/command\nFile changes require explicit /apply approval (or enable auto-apply with /autoapply on). Terminal commands are restricted, previewed, and run only after explicit /run approval. Web browsing remains unavailable.",
       }]);
       return;
     }
@@ -1662,9 +1767,10 @@ const showTokenUsage = () => terminal().width >= 48;
               call.function.name,
               call.function.arguments,
               workspaceTools,
-              (id) => { pendingProposalId = id; },
+              (id) => { pendingProposalId = id; lastApproval = undefined; },
               terminalTools,
-              (id) => { pendingCommandId = id; },
+              (id) => { pendingCommandId = id; lastApproval = undefined; },
+              mode(),
             );
           let toolOutput = result.ok ? result.output : `Tool failed: ${result.error}`;
           if (repeatedCallGuard.observe(call.function.name, call.function.arguments, toolOutput)) {
@@ -1690,6 +1796,23 @@ const showTokenUsage = () => terminal().width >= 48;
                 totalLines: String(p.totalLines ?? 0),
               },
             }]);
+            
+            // Auto-apply if enabled and in build mode
+            if (autoApply === "auto" && mode() === "build" && workspaceTools) {
+              const applyResult = await workspaceTools.applyWrite(p.id);
+              if (applyResult.ok) {
+                pendingProposalId = undefined;
+                lastApproval = { kind: "file", id: p.id, status: "applied", automatic: true };
+                // Update proposal card status
+                setMessages((old) => old.map((m) => (m.meta?.id === p.id ? { ...m, meta: { ...m.meta, status: "applied automatically" } } : m)));
+                // Replace tool output with auto-applied message
+                toolOutput = `PROPOSAL AUTO-APPLIED — ${applyResult.output}`;
+              } else {
+                // Auto-apply failed, keep proposal pending
+                setMessages((old) => old.map((m) => (m.meta?.id === p.id ? { ...m, meta: { ...m.meta, status: "auto-apply failed · awaiting approval" } } : m)));
+                toolOutput = `Auto-apply failed: ${applyResult.error}. The proposal is still pending — use /apply to approve or /reject to discard.`;
+              }
+            }
           }
           if (result.ok && call.function.name === "terminal_propose") {
             setMessages((old) => [...old, { role: "assistant", content: "· awaiting /run", kind: "approval" }]);
@@ -1858,6 +1981,44 @@ const showTokenUsage = () => terminal().width >= 48;
         } else {
           store.close();
           renderer.destroy();
+        }
+        return;
+      }
+      // Ctrl+Y - apply pending file proposal (when idle)
+      if (key.ctrl && !key.shift && key.name === "y") {
+        if (!busy() && !connectOpen() && !sessionPickerOpen() && !catMenuOpen() && !modelPickerOpen() && !renameOpen()) {
+          void (async () => {
+            if (pendingProposalId && workspaceTools) {
+              const proposalId = pendingProposalId;
+              const result = await workspaceTools.applyWrite(proposalId);
+              if (result.ok) {
+                pendingProposalId = undefined;
+                lastApproval = { kind: "file", id: proposalId, status: "applied" };
+                setMessages((old) => old.map((m) => (m.meta?.id === proposalId ? { ...m, meta: { ...m.meta, status: "applied" } } : m)));
+                setMessages((old) => [...old, { role: "assistant", content: result.output }]);
+                setCatMood("happy");
+                setNotice("approved change applied (Ctrl+Y)");
+              } else {
+                setMessages((old) => [...old, { role: "assistant", content: `Change not applied: ${result.error}` }]);
+                setCatMood("error");
+                setNotice("approval failed");
+              }
+            } else if (pendingCommandId && terminalTools) {
+              // For terminal commands, Ctrl+Y does /run
+              const id = pendingCommandId;
+              pendingCommandId = undefined;
+              setBusy(true);
+              setNotice("running approved command…");
+              const result = await terminalTools.runApproved(id);
+              setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : `Command failed: ${result.error}` }]);
+              lastApproval = { kind: "command", id, status: result.ok ? "completed" : "failed" };
+              setNotice(result.ok ? "command completed" : "command failed");
+              setCatMood(result.ok ? "zoomies" : "error");
+              setBusy(false);
+            } else {
+              showToast("No pending proposal or command to approve");
+            }
+          })();
         }
         return;
       }
@@ -2242,6 +2403,11 @@ const showTokenUsage = () => terminal().width >= 48;
                     <box flexDirection="row" gap={1} width="100%" minWidth={0}>
                       <text fg={colors.peach} wrapMode="none" flexShrink={0}>·</text>
                       <text fg={colors.peach} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.content}</text>
+                    </box>
+                  ) : message.kind === "mode" ? (
+                    <box flexDirection="row" gap={1} width="100%" minWidth={0} paddingLeft={1} paddingRight={1}>
+                      <text fg={message.meta?.mode === "plan" ? colors.pink : colors.mint} wrapMode="none" flexShrink={0}>●</text>
+                      <text fg={message.meta?.mode === "plan" ? colors.pink : colors.mint} wrapMode="none" flexGrow={1} minWidth={0}>{message.content}</text>
                     </box>
                   ) : (
                     <>

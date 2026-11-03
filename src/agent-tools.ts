@@ -7,6 +7,7 @@ export type HarnessCapability = {
   available: boolean;
   description: string;
   access: "read" | "approval-required" | "unavailable";
+  modeAccess?: "plan" | "build";
 };
 
 type ToolExecution = { ok: true; output: string; proposal?: WriteProposal } | { ok: false; error: string };
@@ -14,47 +15,95 @@ type ToolExecution = { ok: true; output: string; proposal?: WriteProposal } | { 
 const stringProperty = (description: string) => ({ type: "string", description });
 
 /** This registry is the source of truth for what the model can actually invoke. */
-export function getCapabilities(workspaceReady: boolean): HarnessCapability[] {
+export function getCapabilities(workspaceReady: boolean, mode: "plan" | "build" = "build"): HarnessCapability[] {
   return [
-    { id: "workspace.list", available: workspaceReady, description: "List files and directories inside the configured workspace.", access: workspaceReady ? "read" : "unavailable" },
-    { id: "workspace.read", available: workspaceReady, description: "Read bounded, recognized text files inside the configured workspace; sensitive files are blocked.", access: workspaceReady ? "read" : "unavailable" },
-    { id: "workspace.search", available: workspaceReady, description: "Search recognized text files inside the configured workspace with size and result limits.", access: workspaceReady ? "read" : "unavailable" },
-    { id: "workspace.propose_write", available: workspaceReady, description: "Prepare a full-file replacement proposal. It does not change the file until the user reviews it and explicitly runs /apply.", access: workspaceReady ? "approval-required" : "unavailable" },
-    { id: "workspace.propose_patch", available: workspaceReady, description: "Prepare a targeted exact-text patch proposal. Changes still require /apply.", access: workspaceReady ? "approval-required" : "unavailable" },
-    { id: "workspace.project_context", available: workspaceReady, description: "Discover project manifests, README/AGENTS documents, project type, and .gitignore.", access: workspaceReady ? "read" : "unavailable" },
-    { id: "terminal.approved_execute", available: workspaceReady, description: "Run a restricted command only after the user inspects its preview and explicitly types /run. The model cannot approve execution.", access: workspaceReady ? "approval-required" : "unavailable" },
+    { id: "workspace.list", available: workspaceReady, description: "List files and directories inside the configured workspace.", access: workspaceReady ? "read" : "unavailable", modeAccess: "build" },
+    { id: "workspace.read", available: workspaceReady, description: "Read bounded, recognized text files inside the configured workspace; sensitive files are blocked.", access: workspaceReady ? "read" : "unavailable", modeAccess: "build" },
+    { id: "workspace.search", available: workspaceReady, description: "Search recognized text files inside the configured workspace with size and result limits.", access: workspaceReady ? "read" : "unavailable", modeAccess: "build" },
+    { id: "workspace.propose_write", available: workspaceReady, description: "Prepare a full-file replacement proposal. It does not change the file until the user reviews it and explicitly runs /apply.", access: workspaceReady ? "approval-required" : "unavailable", modeAccess: "build" },
+    { id: "workspace.propose_patch", available: workspaceReady, description: "Prepare a targeted exact-text patch proposal. Changes still require /apply.", access: workspaceReady ? "approval-required" : "unavailable", modeAccess: "build" },
+    { id: "workspace.project_context", available: workspaceReady, description: "Discover project manifests, README/AGENTS documents, project type, and .gitignore.", access: workspaceReady ? "read" : "unavailable", modeAccess: "build" },
+    { id: "terminal.approved_execute", available: workspaceReady, description: "Run a restricted command only after the user inspects its preview and explicitly types /run. The model cannot approve execution.", access: workspaceReady ? "approval-required" : "unavailable", modeAccess: "build" },
     { id: "web.browse", available: false, description: "Browse the public internet. No browser/search tool is registered in this version.", access: "unavailable" },
     { id: "external_apps", available: false, description: "Act on external apps or accounts. No external connectors are registered in this version.", access: "unavailable" },
   ];
 }
 
-export function buildSystemPrompt(workspaceReady: boolean, workspaceRoot?: string, limits: { maxToolRounds?: number; maxToolCallsPerTurn?: number } = {}, mode: "plan" | "build" = "build"): string {
+export interface SystemPromptState {
+  modeTransition?: { from: "plan" | "build"; to: "plan" | "build" };
+  pendingProposalId?: string;
+  pendingCommandId?: string;
+  lastApproval?: { kind: "file" | "command"; id: string; status: string; automatic?: boolean };
+  autoApply?: "manual" | "auto";
+}
+
+export function buildSystemPrompt(workspaceReady: boolean, workspaceRoot?: string, limits: { maxToolRounds?: number; maxToolCallsPerTurn?: number } = {}, mode: "plan" | "build" = "build", state?: SystemPromptState): string {
   const maxToolRounds = limits.maxToolRounds ?? 12;
   const maxToolCallsPerTurn = limits.maxToolCallsPerTurn ?? 24;
-  const capabilities = getCapabilities(workspaceReady);
+  const capabilities = getCapabilities(workspaceReady, mode);
   const available = capabilities.filter((capability) => capability.available);
   const unavailable = capabilities.filter((capability) => !capability.available);
-  return [
+  
+  // Build mode-specific capability list
+  const availableInMode = available.filter((cap) => cap.modeAccess !== "build" || mode === "build");
+  const unavailableInMode = capabilities.filter((cap) => !cap.available || (cap.modeAccess === "build" && mode === "plan"));
+  
+  const modeText = mode === "plan"
+    ? "PLAN MODE (read-only): You can list, read, search, and inspect workspace files. This is NOT a no-access mode. If the user asks about a file, use the read tools and answer from its contents. Never say you cannot see or access files. The only restriction is that you cannot create file-edit proposals, apply edits, or propose terminal commands. Do not claim any file was changed. Give a concrete plan with exact paths and intended changes, then tell the user to press Shift+Tab to switch to Build mode to execute it."
+    : "BUILD MODE: You may use all registered tools, including proposal workflows, when they materially help. Reads are always available. File edits use the proposal workflow and require explicit /apply approval (unless auto-apply is enabled). Terminal commands require /run approval.";
+  
+  // Build approval state block
+  let approvalState = "";
+  if (state?.pendingProposalId) {
+    approvalState = `APPROVAL STATE: File proposal ${state.pendingProposalId} is awaiting /apply or /reject. Do not create another proposal until it is resolved.`;
+  } else if (state?.pendingCommandId) {
+    approvalState = `APPROVAL STATE: Terminal command ${state.pendingCommandId} is awaiting /run or /reject-command. Do not propose another command until it is resolved.`;
+  } else if (state?.lastApproval) {
+    const action = state.lastApproval.kind === "file" ? "/apply" : "/run";
+    const autoNote = state.lastApproval.automatic ? " (applied automatically)" : "";
+    approvalState = `LAST APPROVAL EVENT: ${state.lastApproval.kind === "file" ? "File proposal" : "Terminal command"} ${state.lastApproval.id} was ${state.lastApproval.status}${autoNote}. It is no longer pending; do not ask for ${action} again.`;
+  } else {
+    approvalState = "APPROVAL STATE: none. There is no file proposal or terminal command awaiting approval. Do not ask the user to run /apply or /run; there is nothing to approve.";
+  }
+  
+  // Build mode transition block
+  let modeTransition = "";
+  if (state?.modeTransition) {
+    modeTransition = `MODE TRANSITION: The user most recently switched from ${state.modeTransition.from.toUpperCase()} to ${state.modeTransition.to.toUpperCase()}. The current mode is ${state.modeTransition.to.toUpperCase()}. Trust this over earlier turns; do not continue answering as if ${state.modeTransition.from.toUpperCase()} mode were still active.`;
+  }
+  
+  // Build auto-apply block
+  let autoApplyBlock = "";
+  if (state?.autoApply === "auto" && mode === "build") {
+    autoApplyBlock = "AUTO-APPLY: enabled. The harness applies file proposals immediately after creation. Do not ask the user to run /apply. Report the apply result from the tool output; if auto-apply failed, the proposal remains pending and the user must approve or reject it.";
+  } else if (state?.autoApply === "manual") {
+    autoApplyBlock = "AUTO-APPLY: manual. File proposals require explicit /apply approval. Only mention /apply when a proposal is actually pending, or when you have just created one in this turn. Never repeat an approval request after it was applied, rejected, or discarded.";
+  }
+  
+  const parts = [
     "You are MINT, a friendly and practical coding assistant running inside the MINT harness.",
     "Be concise, accurate, and transparent. Never reveal private chain-of-thought or provide an internal reasoning transcript; give the answer and a brief rationale when useful.",
     `MODE: ${mode.toUpperCase()}.`,
-    mode === "plan"
-      ? "PLAN MODE: You are in plan mode. Do not propose file edits or terminal commands. You may read, search, and inspect project context. Produce a clear plan and tell the user to switch to Build mode (Shift+Tab) to execute it."
-      : "BUILD MODE: You may use all registered tools, including proposal workflows, when they materially help.",
+    modeText,
+    modeTransition ? modeTransition : "",
+    approvalState,
+    autoApplyBlock ? autoApplyBlock : "",
     "CAPABILITY RULES:",
     "- This list is generated from the active harness registry. Treat it as the source of truth; do not replace it with generic assumptions.",
     "- Use registered tools when they materially help. A tool call is an action request, not proof of success; rely on the returned tool result.",
     `- The harness allows at most ${maxToolRounds} tool rounds and ${maxToolCallsPerTurn} total tool calls per user turn, enforced per turn. These are configurable in \`.env\` with \`MINT_MAX_TOOL_ROUNDS\` and \`MINT_MAX_TOOL_CALLS_PER_TURN\` (positive integers; restart MINT after changing). Avoid repeating a tool call when its arguments and result are unchanged.`,
     "- Never claim a file was read/changed, a command was run, a website was browsed, or an external action was completed unless a tool result confirms it.",
     "- Workspace paths are restricted to the configured root. Do not claim access to arbitrary files elsewhere on the user's machine.",
-    "- File edits must use the proposal workflow. Prefer targeted exact-text patches for small edits; use full-file replacement only when appropriate. Never bypass approval; explain that the user must review the diff and run /apply.",
+    "- File edits must use the proposal workflow. Prefer targeted exact-text patches for small edits; use full-file replacement only when appropriate. Never bypass approval; explain that the user must review the diff and run /apply (unless auto-apply is enabled).",
     "- Terminal commands may only be proposed through terminal_propose. Never execute a command directly. The user must inspect the exact command and working directory, then explicitly type /run.",
     "- Use workspace_project_context before making broad project changes when project structure or conventions are unclear. Respect .gitignore and sensitive-file exclusions.",
     "- If a capability is unavailable, say exactly which capability is unavailable in this harness. Do not imply that changing the prompt alone enables it.",
     `WORKSPACE: ${workspaceReady ? `ready at ${workspaceRoot ?? "the configured root"}` : "not ready; workspace tools are currently unavailable"}.`,
-    `AVAILABLE CAPABILITIES:\n${available.map((capability) => `- ${capability.id} (${capability.access}): ${capability.description}`).join("\n") || "- none"}`,
-    `UNAVAILABLE CAPABILITIES:\n${unavailable.map((capability) => `- ${capability.id}: ${capability.description}`).join("\n")}`,
-  ].join("\n\n");
+    `AVAILABLE CAPABILITIES (${mode.toUpperCase()} mode):\n${availableInMode.map((capability) => `- ${capability.id} (${capability.access}): ${capability.description}`).join("\n") || "- none"}`,
+    `UNAVAILABLE IN ${mode.toUpperCase()} MODE:\n${unavailableInMode.map((capability) => `- ${capability.id}: ${capability.description}`).join("\n") || "- none"}`,
+  ].filter(Boolean);
+  
+  return parts.join("\n\n");
 }
 
 export function getModelTools(workspaceReady: boolean, mode: "plan" | "build" = "build"): FunctionTool[] {
@@ -130,8 +179,15 @@ export async function executeModelTool(
   onProposalCreated: (id: string) => void,
   terminal?: ApprovedTerminal,
   onCommandCreated: (id: string) => void = () => {},
+  mode: "plan" | "build" = "build",
 ): Promise<ToolExecution> {
   if (!workspace) return { ok: false, error: "Workspace tools are unavailable because workspace initialization has not succeeded." };
+  
+  // Plan mode enforcement at execution time
+  if (mode === "plan" && ["workspace_propose_write", "workspace_propose_patch", "terminal_propose"].includes(name)) {
+    return { ok: false, error: "Plan mode is read-only. Switch to Build mode (Shift+Tab) to create proposals or run commands." };
+  }
+  
   let args: Record<string, unknown>;
   try {
     const parsed: unknown = JSON.parse(rawArguments || "{}");
