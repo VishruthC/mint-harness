@@ -1,5 +1,5 @@
 import type { FunctionTool } from "./nvidia";
-import type { WorkspaceTools } from "./tools";
+import type { WorkspaceTools, WriteProposal } from "./tools";
 import type { ApprovedTerminal } from "./terminal";
 
 export type HarnessCapability = {
@@ -9,7 +9,7 @@ export type HarnessCapability = {
   access: "read" | "approval-required" | "unavailable";
 };
 
-type ToolExecution = { ok: true; output: string } | { ok: false; error: string };
+type ToolExecution = { ok: true; output: string; proposal?: WriteProposal } | { ok: false; error: string };
 
 const stringProperty = (description: string) => ({ type: "string", description });
 
@@ -28,7 +28,7 @@ export function getCapabilities(workspaceReady: boolean): HarnessCapability[] {
   ];
 }
 
-export function buildSystemPrompt(workspaceReady: boolean, workspaceRoot?: string, limits: { maxToolRounds?: number; maxToolCallsPerTurn?: number } = {}): string {
+export function buildSystemPrompt(workspaceReady: boolean, workspaceRoot?: string, limits: { maxToolRounds?: number; maxToolCallsPerTurn?: number } = {}, mode: "plan" | "build" = "build"): string {
   const maxToolRounds = limits.maxToolRounds ?? 12;
   const maxToolCallsPerTurn = limits.maxToolCallsPerTurn ?? 24;
   const capabilities = getCapabilities(workspaceReady);
@@ -37,6 +37,10 @@ export function buildSystemPrompt(workspaceReady: boolean, workspaceRoot?: strin
   return [
     "You are MINT, a friendly and practical coding assistant running inside the MINT harness.",
     "Be concise, accurate, and transparent. Never reveal private chain-of-thought or provide an internal reasoning transcript; give the answer and a brief rationale when useful.",
+    `MODE: ${mode.toUpperCase()}.`,
+    mode === "plan"
+      ? "PLAN MODE: You are in plan mode. Do not propose file edits or terminal commands. You may read, search, and inspect project context. Produce a clear plan and tell the user to switch to Build mode (Shift+Tab) to execute it."
+      : "BUILD MODE: You may use all registered tools, including proposal workflows, when they materially help.",
     "CAPABILITY RULES:",
     "- This list is generated from the active harness registry. Treat it as the source of truth; do not replace it with generic assumptions.",
     "- Use registered tools when they materially help. A tool call is an action request, not proof of success; rely on the returned tool result.",
@@ -53,9 +57,9 @@ export function buildSystemPrompt(workspaceReady: boolean, workspaceRoot?: strin
   ].join("\n\n");
 }
 
-export function getModelTools(workspaceReady: boolean): FunctionTool[] {
+export function getModelTools(workspaceReady: boolean, mode: "plan" | "build" = "build"): FunctionTool[] {
   if (!workspaceReady) return [];
-  return [
+  const all: FunctionTool[] = [
     {
       type: "function",
       function: {
@@ -113,6 +117,10 @@ export function getModelTools(workspaceReady: boolean): FunctionTool[] {
       },
     },
   ];
+  if (mode === "plan") {
+    return all.filter((tool) => !["workspace_propose_write", "workspace_propose_patch", "terminal_propose"].includes(tool.function.name));
+  }
+  return all;
 }
 
 export async function executeModelTool(
@@ -145,7 +153,7 @@ export async function executeModelTool(
       const result = await workspace.proposeWrite(path, args.content);
       if (!result.ok) return result;
       onProposalCreated(result.proposal.id);
-      return { ok: true, output: `PROPOSAL CREATED — no file has been changed.\nPath: ${result.proposal.path}\nProposal ID: ${result.proposal.id}\nReview the preview below. The user must explicitly run /apply to apply this change.\n\n${result.proposal.preview}` };
+      return { ok: true, output: `PROPOSAL CREATED — no file has been changed.\nPath: ${result.proposal.path}\nProposal ID: ${result.proposal.id}\nReview the preview below. The user must explicitly run /apply to apply this change.\n\n${result.proposal.preview}`, proposal: result.proposal };
     }
     case "workspace_project_context":
       return workspace.projectContext();
@@ -155,7 +163,7 @@ export async function executeModelTool(
       const result = await workspace.proposePatch(path, edits);
       if (!result.ok) return result;
       onProposalCreated(result.proposal.id);
-      return { ok: true, output: `PATCH PROPOSAL CREATED — no file has been changed.\nPath: ${result.proposal.path}\nProposal ID: ${result.proposal.id}\nReview the preview and explicitly run /apply.\n\n${result.proposal.preview}` };
+      return { ok: true, output: `PATCH PROPOSAL CREATED — no file has been changed.\nPath: ${result.proposal.path}\nProposal ID: ${result.proposal.id}\nReview the preview and explicitly run /apply.\n\n${result.proposal.preview}\n\nOnly these exact-text regions are targeted. The final file is staged atomically after /apply.`, proposal: result.proposal };
     }
     case "terminal_propose": {
       if (!terminal) return { ok: false, error: "Terminal commands are unavailable." };

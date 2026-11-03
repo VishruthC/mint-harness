@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, readdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
+import { buildUnifiedDiff } from "./diff";
 
 export type ToolResult = { ok: true; output: string } | { ok: false; error: string };
 export type WorkspaceEntry = { name: string; type: "file" | "directory"; size?: number };
-export type WriteProposal = { id: string; path: string; preview: string };
+export type WriteProposal = { id: string; path: string; preview: string; additions: number; deletions: number; totalLines: number };
 type PendingWrite = { id: string; path: string; absolutePath: string; content: string; originalHash: string | null };
 
 const IGNORED_DIRS = new Set([".git", "node_modules", "dist", "build", ".next", ".turbo", "coverage", ".mint"]);
@@ -159,7 +160,8 @@ export class WorkspaceTools {
       ...edit.find.split("\n").map((line) => `-${line}`),
       ...edit.replace.split("\n").map((line) => `+${line}`),
     ].join("\n")).join("\n");
-    return { ok: true, proposal: { ...proposal.proposal, preview: `${proposal.proposal.path}\n\n${targetedPreview}\n\nOnly these exact-text regions are targeted. The final file is staged atomically after /apply.` } };
+    const diff = buildUnifiedDiff(proposal.proposal.path, original, updated);
+    return { ok: true, proposal: { ...proposal.proposal, preview: diff.diff, additions: diff.additions, deletions: diff.deletions, totalLines: diff.totalLines } };
   }
 
   async list(path = "."): Promise<ToolResult> {
@@ -246,7 +248,8 @@ export class WorkspaceTools {
       const display = this.displayPath(safeTarget);
       const proposal: PendingWrite = { id, path: display, absolutePath: safeTarget, content, originalHash };
       this.pendingWrites.set(id, proposal);
-      return { ok: true, proposal: { id, path: display, preview: makePreview(display, originalContent, content) } };
+      const diff = buildUnifiedDiff(display, originalContent, content);
+      return { ok: true, proposal: { id, path: display, preview: diff.diff, additions: diff.additions, deletions: diff.deletions, totalLines: diff.totalLines } };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : "Could not prepare file change." };
     }

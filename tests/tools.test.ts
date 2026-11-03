@@ -111,8 +111,8 @@ describe("WorkspaceTools", () => {
     const proposal = await tools.proposePatch("src/hello.ts", [{ find: "'mrrp'", replace: "'hello'" }]);
     expect(proposal.ok).toBe(true);
     if (!proposal.ok) return;
-    expect(proposal.proposal.preview).toContain("-'mrrp'");
-    expect(proposal.proposal.preview).toContain("+'hello'");
+    expect(proposal.proposal.preview).toContain("-export const greeting = 'mrrp';");
+    expect(proposal.proposal.preview).toContain("+export const greeting = 'hello';");
     const before = await tools.read("src/hello.ts");
     expect(before.ok && before.output).toContain("'mrrp'");
   });

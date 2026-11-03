@@ -42,7 +42,7 @@ import {
 } from "./models";
 import { createHostClipboard, createClipboard, createRendererClipboardAdapter, decodePasteBytes, stripAnsiSequences, SyntaxStyle } from "@opentui/core";
 import type { CliRenderer } from "@opentui/core";
-import { parseMessageSegments, type MessageSegment } from "./message-segments";
+import { parseMessageSegments, parseDiffBlock, type MessageSegment } from "./message-segments";
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 
@@ -251,6 +251,64 @@ function renderSegment(segment: MessageSegment, colors: Palette, markdownStyle: 
   }
 }
 
+function ProposalCard(props: { message: ViewMessage }) {
+  const message = props.message;
+  const parsed = () => parseDiffBlock(message.content);
+  const hunks = () => {
+    const diffSeg = parsed().find((s) => s.type === "diff");
+    return diffSeg && diffSeg.type === "diff" ? diffSeg.hunks : [];
+  };
+  const file = () => {
+    const diffSeg = parsed().find((s) => s.type === "diff");
+    return diffSeg && diffSeg.type === "diff" ? (diffSeg.file ?? message.meta?.path ?? "") : (message.meta?.path ?? "");
+  };
+  const additions = () => message.meta?.additions ?? "0";
+  const deletions = () => message.meta?.deletions ?? "0";
+  const totalLines = () => parseInt(message.meta?.totalLines ?? "0", 10) || 0;
+  const previewLines = () => Math.min(240, hunks().reduce((s, h) => s + h.lines.length, 0));
+  const status = () => message.meta?.status ?? "awaiting approval";
+  const statusColor = () => status() === "applied" ? colors.mint : status() === "rejected" ? colors.muted : colors.peach;
+  const allLines = () => hunks().flatMap((h) => h.lines).slice(0, 240);
+
+  return (
+    <>
+      <box border={["top", "bottom", "left", "right"]} borderColor={colors.rule} backgroundColor={colors.panel} flexDirection="column" gap={0} width="100%" minWidth={0} overflow="hidden">
+        <box flexDirection="row" justifyContent="space-between" paddingLeft={1} paddingRight={1} border={["bottom"]} borderColor={colors.rule}>
+          <text fg={colors.muted} wrapMode="none">{message.meta?.tool ?? "proposal"}</text>
+          <text fg={statusColor()} wrapMode="none">{status()}</text>
+        </box>
+        <box flexDirection="row" justifyContent="space-between" gap={1} paddingLeft={1} paddingRight={1} border={["bottom"]} borderColor={colors.rule} backgroundColor={colors.bg}>
+          <text fg={colors.lavender} wrapMode="none" truncate={true} flexGrow={1} minWidth={0}>{file()}</text>
+          <text fg={colors.mint} wrapMode="none" flexShrink={0}>+{additions()}</text>
+          <text fg={colors.red} wrapMode="none" flexShrink={0}>−{deletions()}</text>
+        </box>
+        <box flexDirection="column" gap={0} width="100%" minWidth={0} overflow="hidden">
+          <For each={allLines()}>
+            {(line) => {
+              const rowBg = line.type === "add" ? DIFF_ADD_BG : line.type === "remove" ? DIFF_REMOVE_BG : colors.bg;
+              const lineNo = line.type === "remove" ? line.oldLineNum : line.newLineNum;
+              const sign = line.type === "add" ? "+" : line.type === "remove" ? "-" : " ";
+              const contentColor = line.type === "add" ? colors.mint : line.type === "remove" ? colors.red : colors.muted;
+              return (
+                <box flexDirection="row" width="100%" minWidth={0} height={1} minHeight={1} backgroundColor={rowBg} overflow="hidden">
+                  <text fg={colors.muted} bg={rowBg} wrapMode="none" width={6} minWidth={6} textAlign="right">{String(lineNo ?? "").padStart(5) + " "}</text>
+                  <text fg={contentColor} bg={rowBg} wrapMode="none" width={2} minWidth={2} textAlign="center">{sign}</text>
+                  <text fg={contentColor} bg={rowBg} wrapMode="none" flexGrow={1} minWidth={0}>{line.content.length ? line.content : " "}</text>
+                </box>
+              );
+            }}
+          </For>
+        </box>
+        <box flexDirection="row" justifyContent="space-between" paddingLeft={1} paddingRight={1} border={["top"]} borderColor={colors.rule}>
+          <text fg={colors.muted} wrapMode="none">proposal {message.meta?.id ?? ""}</text>
+          <text fg={colors.muted} wrapMode="none">preview {previewLines()} / {totalLines()} lines</text>
+        </box>
+      </box>
+      <text fg={colors.muted} wrapMode="word" width="100%">No file has been changed. Review the diff, then type /apply to approve or /reject to discard it.</text>
+    </>
+  );
+}
+
 function App() {
   const [input, setInput] = createSignal("");
   const [cursorPos, setCursorPos] = createSignal(0);
@@ -321,16 +379,45 @@ function App() {
   ]);
   const [mode, setMode] = createSignal<"plan" | "build">("plan");
   const [modeLocked, setModeLocked] = createSignal(false);
-  const toggleMode = () => setMode((m) => (m === "plan" ? "build" : "plan"));
+  const toggleMode = () => {
+    if (busy() || modeLocked()) return;
+    setMode((m) => {
+      const next = m === "plan" ? "build" : "plan";
+      setHistory((old) => [systemMessage(next), ...old.filter((message) => message.role !== "system")]);
+      setNotice(next === "plan" ? "plan mode: read-only planning" : "build mode: full tools enabled");
+      return next;
+    });
+  };
   const [models, setModels] = createSignal<NvidiaModel[]>([]);
   const [model, setModel] = createSignal("");
   const [status, setStatus] = createSignal("starting");
   const [busy, setBusy] = createSignal(false);
+  const [streamingContent, setStreamingContent] = createSignal("");
+  const [streamingActive, setStreamingActive] = createSignal(false);
+  const beginStreaming = () => {
+    setStreamingContent("");
+    setStreamingActive(true);
+  };
+  const commitStreamingAnswer = (content: string) => {
+    setStreamingActive(false);
+    setStreamingContent("");
+    setMessages((old) => {
+      const next = [...old];
+      const last = next[next.length - 1];
+      if (last?.role === "assistant" && !last.kind) next[next.length - 1] = { ...last, content };
+      else next.push({ role: "assistant", content });
+      return next;
+    });
+  };
+  const cancelStreamingPreview = () => {
+    setStreamingActive(false);
+    setStreamingContent("");
+  };
   const [notice, setNotice] = createSignal("Connecting to NVIDIA…");
   let workspaceTools: WorkspaceTools | undefined;
   let terminalTools: ApprovedTerminal | undefined;
   let agentLimits = { maxToolRounds: 12, maxToolCallsPerTurn: 24 };
-  const systemMessage = (): ChatMessage => ({ role: "system", content: buildSystemPrompt(Boolean(workspaceTools), workspaceTools?.root, agentLimits) });
+  const systemMessage = (m: "plan" | "build" = mode()): ChatMessage => ({ role: "system", content: buildSystemPrompt(Boolean(workspaceTools), workspaceTools?.root, agentLimits, m) });
   const [history, setHistory] = createSignal<ChatMessage[]>([systemMessage()]);
   const store = new SessionStore();
   const [catProfile, setCatProfile] = createSignal<CatProfile>(store.getCatProfile());
@@ -594,7 +681,18 @@ const showTokenUsage = () => terminal().width >= 48;
     return filtered;
   });
 
+  createEffect(() => {
+    const count = modelPickerSuggestions().length;
+    const idx = modelPickerIndex();
+    if (count === 0) { if (idx !== 0) setModelPickerIndex(0); return; }
+    if (idx >= count) setModelPickerIndex(count - 1);
+    if (idx < 0) setModelPickerIndex(0);
+  });
+
+
+  const [sessionTitleRevision, setSessionTitleRevision] = createSignal(0);
   const getSessionTitle = () => {
+    sessionTitleRevision();
     const sid = session();
     if (sid) {
       const s = store.getSession(sid);
@@ -602,6 +700,9 @@ const showTokenUsage = () => terminal().width >= 48;
     }
     return draftSessionTitle() || "new session";
   };
+  const statusColor = () => status() === "connected" ? colors.mint : status() === "error" ? colors.red : colors.peach;
+  const statusGlyph = () => status() === "connected" ? "●" : status() === "error" ? "✗" : "◌";
+  const statusLabel = () => status() === "connected" ? "connected" : status() === "error" ? "error" : "connecting";
 
   const persist = (message: StoredMessage) => {
     const sid = session();
@@ -1006,8 +1107,9 @@ const showTokenUsage = () => terminal().width >= 48;
       });
       return true;
     }
-    if (key.sequence && key.sequence.length === 1 && !key.ctrl) {
-      setModelPickerQuery((q) => q + key.sequence);
+    const pickerChar = key.sequence && key.sequence.length === 1 ? key.sequence : (key.name && key.name.length === 1 ? key.name : "");
+    if (pickerChar && !key.ctrl) {
+      setModelPickerQuery((q) => q + pickerChar);
       setModelPickerIndex(0);
       return true;
     }
@@ -1038,6 +1140,7 @@ const showTokenUsage = () => terminal().width >= 48;
     if (sid) {
       store.renameSession(sid, title);
       setDraftSessionTitle(title);
+      setSessionTitleRevision((v) => v + 1);
       setNotice(`Session renamed to "${title}"`);
       showToast(`♡ session renamed: ${title}`);
     } else {
@@ -1117,6 +1220,7 @@ const showTokenUsage = () => terminal().width >= 48;
         if (sid) {
           store.renameSession(sid, normalized);
           setDraftSessionTitle(normalized);
+          setSessionTitleRevision((v) => v + 1);
           setNotice(`Session renamed to "${normalized}"`);
           showToast(`♡ session renamed: ${normalized}`);
         } else {
@@ -1269,12 +1373,20 @@ const showTokenUsage = () => terminal().width >= 48;
         return;
       }
       pendingProposalId = result.proposal.id;
-      setMessages((old) => [...old, { role: "assistant", content: `PROPOSED CHANGE · ${result.proposal.path}
-Proposal ID: ${result.proposal.id}
-
-${result.proposal.preview}
-
-No file has been changed. Review this preview, then type /apply to approve or /reject to discard it.` }]);
+      setMessages((old) => [...old, {
+        role: "assistant",
+        content: result.proposal.preview,
+        kind: "proposal",
+        meta: {
+          id: result.proposal.id,
+          path: result.proposal.path,
+          tool: "workspace_propose_write",
+          status: "awaiting approval",
+          additions: String(result.proposal.additions ?? 0),
+          deletions: String(result.proposal.deletions ?? 0),
+          totalLines: String(result.proposal.totalLines ?? 0),
+        },
+      }]);
       setNotice(`review proposal ${result.proposal.id}`);
       return;
     }
@@ -1284,6 +1396,9 @@ No file has been changed. Review this preview, then type /apply to approve or /r
         return;
       }
       const result = await workspaceTools.applyWrite(pendingProposalId);
+      if (result.ok) {
+        setMessages((old) => old.map((m) => (m.meta?.id === pendingProposalId ? { ...m, meta: { ...m.meta, status: "applied" } } : m)));
+      }
       setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : `Change not applied: ${result.error}` }]);
       if (result.ok) { pendingProposalId = undefined; setCatMood("happy"); }
       else setCatMood("error");
@@ -1296,6 +1411,7 @@ No file has been changed. Review this preview, then type /apply to approve or /r
         return;
       }
       const result = workspaceTools.rejectWrite(pendingProposalId);
+      setMessages((old) => old.map((m) => (m.meta?.id === pendingProposalId ? { ...m, meta: { ...m.meta, status: "rejected" } } : m)));
       pendingProposalId = undefined;
       setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : result.error }]);
       setNotice("proposal rejected");
@@ -1463,10 +1579,12 @@ No file has been changed. Review this preview, then type /apply to approve or /r
 
     lastUserPrompt = text;
     setMessages((old) => [...old, { role: "user", content: text }, { role: "assistant", content: "" }]);
+    beginStreaming();
     persist({ role: "user", content: text });
     const updatedHistory: ChatMessage[] = [systemMessage(), ...history().filter((message) => message.role !== "system"), { role: "user", content: text }];
     setHistory(updatedHistory);
     setBusy(true);
+    setModeLocked(true);
     setCatMood("thinking");
     activeController = new AbortController();
     setNotice(`thinking with ${model()}…`);
@@ -1479,18 +1597,20 @@ No file has been changed. Review this preview, then type /apply to approve or /r
       const repeatedCallGuard = new RepeatedCallGuard();
       while (budget.startRound()) {
         answer = "";
+        setMessages((old) => {
+          const next = [...old];
+          const last = next[next.length - 1];
+          if (!(last?.role === "assistant" && !last.kind)) next.push({ role: "assistant", content: "" });
+          return next;
+        });
+        beginStreaming();
         let requestedCalls: ToolCall[] = [];
         let roundUsage: TokenUsage | null = null;
-        const registeredTools = getModelTools(Boolean(workspaceTools));
+        const registeredTools = getModelTools(Boolean(workspaceTools), mode());
         for await (const event of client.streamAgent(model(), workingHistory, registeredTools, activeController.signal)) {
           if (event.type === "content") {
             answer += event.content;
-            setMessages((old) => {
-              const next = [...old];
-              const last = next[next.length - 1];
-              if (last?.role === "assistant") next[next.length - 1] = { ...last, content: answer };
-              return next;
-            });
+            setStreamingContent(answer);
           } else if (event.type === "usage") {
             roundUsage = event.usage;
           } else {
@@ -1505,6 +1625,7 @@ No file has been changed. Review this preview, then type /apply to approve or /r
         }
 
         if (!requestedCalls.length) {
+          commitStreamingAnswer(answer);
           completed = true;
           break;
         }
@@ -1521,13 +1642,13 @@ No file has been changed. Review this preview, then type /apply to approve or /r
         workingHistory.push({ role: "assistant", content: answer || null, tool_calls: requestedCalls });
         answer = "";
         // Surface a timeline entry per tool call instead of a single placeholder.
+        cancelStreamingPreview();
         setMessages((old) => {
           const next = [...old];
           const last = next[next.length - 1];
           if (last?.role === "assistant" && !last.kind) next[next.length - 1] = { ...last, content: "" };
           return next;
         });
-        let proposalPreview: string | undefined;
         for (const call of requestedCalls) {
           setNotice(`running ${call.function.name}…`);
           // Tool call timeline line
@@ -1549,36 +1670,43 @@ No file has been changed. Review this preview, then type /apply to approve or /r
           if (repeatedCallGuard.observe(call.function.name, call.function.arguments, toolOutput)) {
             toolOutput = "Repeated tool call detected: the arguments and result have remained identical for multiple attempts. Use the prior result or change the operation instead of looping.";
           }
-          if (result.ok && ["workspace_propose_write", "workspace_propose_patch", "terminal_propose"].includes(call.function.name)) proposalPreview = result.output;
           workingHistory.push({ role: "tool", tool_call_id: call.id, content: toolOutput });
           // Result timeline line
           const firstLine = toolOutput.split("\n")[0]?.slice(0, 120) ?? "";
           setMessages((old) => [...old, { role: "assistant", content: firstLine, kind: "result" }]);
-          if (result.ok && ["workspace_propose_write", "workspace_propose_patch"].includes(call.function.name)) {
-            setMessages((old) => [...old, { role: "assistant", content: "proposal · ready to review", kind: "proposal" }]);
-            setMessages((old) => [...old, { role: "assistant", content: "· awaiting /apply", kind: "approval" }]);
+          if (result.ok && ["workspace_propose_write", "workspace_propose_patch"].includes(call.function.name) && result.proposal) {
+            const p = result.proposal;
+            setMessages((old) => [...old, {
+              role: "assistant",
+              content: p.preview,
+              kind: "proposal",
+              meta: {
+                id: p.id,
+                path: p.path,
+                tool: call.function.name,
+                status: "awaiting approval",
+                additions: String(p.additions ?? 0),
+                deletions: String(p.deletions ?? 0),
+                totalLines: String(p.totalLines ?? 0),
+              },
+            }]);
           }
           if (result.ok && call.function.name === "terminal_propose") {
             setMessages((old) => [...old, { role: "assistant", content: "· awaiting /run", kind: "approval" }]);
           }
         }
-        setMessages((old) => {
-          const next = [...old];
-          const last = next[next.length - 1];
-          if (last?.role === "assistant" && !last.kind) next[next.length - 1] = { ...last, content: proposalPreview ?? "" };
-          if (proposalPreview) next.push({ role: "assistant", content: "", kind: "text" });
-          return next;
-        });
       }
       if (!completed) {
         if (!answer.includes("limit reached:")) {
           const reached = budget.getLimitReached() ?? "rounds";
           answer = formatLimitMessage(reached, budget, "The requested task may still need implementation, verification, or error fixing.");
         }
+        cancelStreamingPreview();
         setMessages((old) => {
           const next = [...old];
           const last = next[next.length - 1];
-          if (last?.role === "assistant") next[next.length - 1] = { ...last, content: answer };
+          if (last?.role === "assistant" && !last.kind) next[next.length - 1] = { ...last, content: answer };
+          else next.push({ role: "assistant", content: answer });
           return next;
         });
       }
@@ -1589,6 +1717,7 @@ No file has been changed. Review this preview, then type /apply to approve or /r
       setNotice("ready ♡");
       setCatMood("happy");
     } catch (error) {
+      cancelStreamingPreview();
       const aborted = activeController?.signal.aborted ?? false;
       const message = aborted ? "Request cancelled." : error instanceof Error ? error.message : "Unknown NVIDIA API error";
       setMessages((old) => {
@@ -1606,6 +1735,8 @@ No file has been changed. Review this preview, then type /apply to approve or /r
     } finally {
       activeController = undefined;
       setBusy(false);
+       setModeLocked(false);
+       cancelStreamingPreview();
     }
   };
 
@@ -2021,22 +2152,14 @@ No file has been changed. Review this preview, then type /apply to approve or /r
               <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>/ tiny coding companion</text>
             </Show>
           </box>
-          <Show when={terminal().width >= 60}>
-            <box flexGrow={1} justifyContent="center" minWidth={0} overflow="hidden">
-              <text fg={colors.lavender} wrapMode="none" textAlign="center" truncate={true}>✧ {getSessionTitle()} ✧</text>
+          <box flexDirection="row" alignItems="center" justifyContent="flex-end" gap={1} flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+            <box flexShrink={1} minWidth={0} overflow="hidden">
+              <text fg={colors.lavender} wrapMode="none" truncate={true} width="100%">{getSessionTitle()}</text>
             </box>
-          </Show>
-          <box flexDirection="row" gap={2} minWidth={0} flexShrink={0}>
-            <Show when={terminal().width >= 48}>
-              <text fg={status() === "connected" ? colors.mint : status() === "error" ? colors.red : colors.peach} wrapMode="none" flexShrink={0}>
-                {status() === "connected" ? "● connected" : status() === "error" ? "● error" : "◌ connecting"}
-              </text>
-            </Show>
-            <Show when={terminal().width < 48}>
-              <text fg={status() === "connected" ? colors.mint : status() === "error" ? colors.red : colors.peach} wrapMode="none" flexShrink={0}>
-                {status() === "connected" ? "●" : status() === "error" ? "✗" : "◌"}
-              </text>
-            </Show>
+            <text fg={colors.rule} wrapMode="none" flexShrink={0}>│</text>
+            <text fg={statusColor()} wrapMode="none" flexShrink={0}>
+              {terminal().width >= 56 ? `${statusGlyph()} ${statusLabel()}` : statusGlyph()}
+            </text>
           </box>
         </box>
       </box>
@@ -2080,30 +2203,6 @@ No file has been changed. Review this preview, then type /apply to approve or /r
               <text fg={colors.text} width="100%" minWidth={0} wrapMode="none" truncate={true}>{draftSessionTitle() || "new session"}</text>
               <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>draft · saved on first message</text>
             </Show>
-            <box border={["bottom"]} borderColor={colors.rule} width="100%" height={1} minHeight={1} />
-            <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none" truncate={true}>MODEL</text>
-            <text
-              fg={colors.muted}
-              width="100%"
-              minWidth={0}
-              wrapMode="none"
-              truncate={true}
-              onMouseUp={(e) => { e.stopPropagation(); openModelPicker(); }}
-            >
-              {model() || "not selected"}
-            </text>
-            <box border={["bottom"]} borderColor={colors.rule} width="100%" height={1} minHeight={1} />
-            <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none" truncate={true}>STATUS</text>
-            <text
-              fg={status() === "connected" ? colors.mint : status() === "error" ? colors.red : colors.peach}
-              width="100%"
-              minWidth={0}
-              wrapMode="none"
-              truncate={true}
-              onMouseUp={(e) => { e.stopPropagation(); openConnectPopup(); }}
-            >
-              {(status() === "connected" ? "● " : status() === "error" ? "● " : "◌ ") + notice()}
-            </text>
           </box>
         </box>
       </Show>
@@ -2120,7 +2219,9 @@ No file has been changed. Review this preview, then type /apply to approve or /r
           </box>
           <scrollbox flexGrow={1} minHeight={0} minWidth={0} width="100%" contentOptions={{ flexDirection: "column", gap: 1 }} stickyScroll={true} stickyStart="bottom">
             <For each={messages()}>
-              {(message) => (
+              {(message, index) => {
+                const isStreamingRow = () => streamingActive() && index() === messages().length - 1 && message.role === "assistant" && !message.kind;
+                return (
                 <box flexDirection="column" gap={0} width="100%" minWidth={0}>
                   {message.kind === "tool" ? (
                     <box flexDirection="row" gap={1} width="100%" minWidth={0}>
@@ -2136,10 +2237,7 @@ No file has been changed. Review this preview, then type /apply to approve or /r
                       <text fg={colors.muted} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.content}</text>
                     </box>
                   ) : message.kind === "proposal" ? (
-                    <box flexDirection="row" gap={1} width="100%" minWidth={0}>
-                      <text fg={colors.mint} wrapMode="none" flexShrink={0}>✦</text>
-                      <text fg={colors.pink} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.content}</text>
-                    </box>
+                    <ProposalCard message={message} />
                   ) : message.kind === "approval" ? (
                     <box flexDirection="row" gap={1} width="100%" minWidth={0}>
                       <text fg={colors.peach} wrapMode="none" flexShrink={0}>·</text>
@@ -2151,17 +2249,23 @@ No file has been changed. Review this preview, then type /apply to approve or /r
                         {message.role === "user" ? "you ❯" : "mint ♡ · answer"}
                       </text>
                       <box flexDirection="column" gap={0} width="100%" minWidth={0}>
-                        {message.content
-                          ? parseMessageSegments(message.content).map((seg) => renderSegment(seg, colors, markdownStyle()))                          : busy()
-                          ? <text fg={colors.peach} wrapMode="word" width="100%">Waiting for the response…</text>
-                          : null
+                        {isStreamingRow() ? (
+                          <Show when={streamingContent()} fallback={<text fg={colors.peach} wrapMode="word" width="100%">Waiting for the response…</text>}>
+                            <markdown content={streamingContent()} syntaxStyle={markdownStyle()} fg={colors.text} conceal={true} streaming={true} width="100%" minWidth={0} />
+                          </Show>
+                        ) : message.content
+                          ? parseMessageSegments(message.content).map((seg) => renderSegment(seg, colors, markdownStyle()))
+                          : busy()
+                            ? <text fg={colors.peach} wrapMode="word" width="100%">Waiting for the response…</text>
+                            : null
                         }
                       </box>
                     </>
                   )}
                 </box>
-              )}
-            </For>
+              );
+            }}
+          </For>
           </scrollbox>
           <Show when={commandSuggestions().length > 0 && !modelPickerOpen()}>
             <box backgroundColor={colors.bg} borderStyle="single" borderColor={colors.lavender} padding={1} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden" onMouseScroll={(e) => { e.stopPropagation(); }}>
@@ -2212,11 +2316,12 @@ No file has been changed. Review this preview, then type /apply to approve or /r
           <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
             <box backgroundColor={colors.bg} border={["top"]} borderColor={colors.rule} paddingLeft={1} paddingRight={1} paddingBottom={0} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
               <text fg={colors.mint} width="100%" minWidth={0} wrapMode="char">❯ {input().slice(0, cursorPos())}<span style={{ fg: colors.bg, bg: colors.mint }}>{cursorGlyph()}</span>{input().slice(cursorPos() + cursorAdvance())}</text>
-              <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>
-                {terminal().width >= 60
-                  ? `${mode() === "plan" ? "Plan" : "Build"} · ${displayModelName(model() || configuredModel || "")} · ${effort()}`
-                  : `${mode() === "plan" ? "Plan" : "Build"} · ${effort()}`}
-              </text>
+               <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>
+                 <span style={{ fg: mode() === "plan" ? colors.pink : colors.mint }}>{mode() === "plan" ? "Plan" : "Build"}</span>
+                 {terminal().width >= 60
+                   ? ` · ${displayModelName(model() || configuredModel || "")} · ${effort()}`
+                   : ` · ${effort()}`}
+               </text>
             </box>
             <box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1} width="100%" minWidth={0} flexShrink={0} overflow="hidden" paddingLeft={1} paddingRight={1}>
               <text fg={colors.muted} wrapMode="none" flexShrink={1} truncate={true}>{footerLabel()}</text>
@@ -2351,6 +2456,9 @@ No file has been changed. Review this preview, then type /apply to approve or /r
         <box backgroundColor={colors.bg} borderStyle="single" borderColor={colors.lavender} padding={1} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden" onMouseScroll={(e) => handleWheel(e, (d) => setModelPickerIndex(movePickerIndex(modelPickerIndex(), d, modelPickerSuggestions().length)))} >
           <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
             <text fg={colors.lavender} wrapMode="none" width="100%" minWidth={0} truncate={true}>{modelPickerHeader()}</text>
+           <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
+             <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>{`search: ${modelPickerQuery()}${modelPickerQuery() ? "" : " (type to filter)"}`}</text>
+           </box>
           </box>
           <Show when={modelPickerError()}>
             <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">

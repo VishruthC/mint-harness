@@ -16,6 +16,23 @@ describe("MINT harness capability registry", () => {
     ]);
   });
 
+  test("plan mode hides mutating tools", () => {
+    const names = getModelTools(true, "plan").map((tool) => tool.function.name);
+    expect(names).toContain("workspace_list");
+    expect(names).toContain("workspace_read");
+    expect(names).toContain("workspace_search");
+    expect(names).toContain("workspace_project_context");
+    expect(names).not.toContain("workspace_propose_write");
+    expect(names).not.toContain("workspace_propose_patch");
+    expect(names).not.toContain("terminal_propose");
+  });
+
+  test("system prompt reflects plan mode", () => {
+    const prompt = buildSystemPrompt(true, "/workspace/demo", {}, "plan");
+    expect(prompt).toContain("MODE: PLAN");
+    expect(prompt).toContain("PLAN MODE");
+  });
+
   test("generates the system prompt from actual capabilities", () => {
     const prompt = buildSystemPrompt(true, "/workspace/demo");
     expect(prompt).toContain("/workspace/demo");

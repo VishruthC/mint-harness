@@ -1,9 +1,13 @@
 import type { NvidiaModel } from "./nvidia";
 
 export function filterModels(models: NvidiaModel[], query: string): NvidiaModel[] {
-  if (!query.trim()) return models;
-  const q = query.trim().toLowerCase();
-  return models.filter((m) => m.id.toLowerCase().includes(q));
+  const q = query.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!q) return models;
+  return models.filter((m) => {
+    const id = m.id.toLowerCase();
+    const owner = (m.owned_by ?? "").toLowerCase();
+    return id.includes(q) || owner.includes(q) || id.replace(/[^a-z0-9]/g, " ").includes(q);
+  });
 }
 
 export function mergeCurrentModel(models: NvidiaModel[], current: string): NvidiaModel[] {
