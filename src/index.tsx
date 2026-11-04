@@ -312,6 +312,7 @@ function ProposalCard(props: { message: ViewMessage }) {
 function App() {
   const [input, setInput] = createSignal("");
   const [cursorPos, setCursorPos] = createSignal(0);
+  const MAX_INPUT_LINES = 9;
   const cursorChar = () => input()[cursorPos()] ?? "";
   const cursorGlyph = () => {
     const ch = cursorChar();
@@ -321,6 +322,8 @@ function App() {
     const ch = cursorChar();
     return ch && ch !== "\n" ? 1 : 0;
   };
+  const inputLines = () => input().split("\n").length;
+  const atMaxLines = () => inputLines() >= MAX_INPUT_LINES;
   const [commandIndex, setCommandIndex] = createSignal(0);
   const renderer = useRenderer();
   const markdownStyle = createMemo(() => getMarkdownStyle(renderer));
@@ -684,6 +687,21 @@ const showTokenUsage = () => terminal().width >= 48;
     // Keep the folder name and branch visible; trim the start of long paths.
     return "…" + full.slice(full.length - available + 1);
   };
+
+  const allSessions = () => store.listSessions(50, workspaceTools?.root);
+
+  const relativeTime = (iso: string) => {
+    const diff = Date.now() - new Date(iso).getTime();
+    const mins = Math.floor(diff / 60000);
+    const hours = Math.floor(diff / 3600000);
+    const days = Math.floor(diff / 86400000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days < 7) return `${days}d ago`;
+    return new Date(iso).toLocaleDateString();
+  };
+
   const commandPaletteHeader = () =>
     terminal().width >= 64 ? "COMMANDS  ·  ↑/↓ select  ·  Tab complete" : "COMMANDS  ·  ↑/↓  ·  Tab";
 
@@ -732,7 +750,7 @@ const showTokenUsage = () => terminal().width >= 48;
       store.addMessage(sid, message);
     } else {
       // First message - create session with the message
-      const newSession = store.createSessionWithMessage(model(), message, draftSessionTitle() || undefined);
+      const newSession = store.createSessionWithMessage(model(), message, draftSessionTitle() || undefined, workspaceTools?.root);
       setSession(newSession.id);
       setDraftSessionTitle("");
     }
@@ -1273,7 +1291,7 @@ const showTokenUsage = () => terminal().width >= 48;
   };
 
   const openSessionPicker = () => {
-    const sessions = store.listSessions();
+    const sessions = store.listSessions(50, workspaceTools?.root);
     setSessionPickerSessions(sessions);
     setSessionPickerQuery("");
     setSessionPickerHoverIndex(-1);
@@ -2105,8 +2123,10 @@ const showTokenUsage = () => terminal().width >= 48;
       return;
     }
     if (key.name === "return" && key.shift) {
-      setInput(value.slice(0, pos) + "\n" + value.slice(pos));
-      setCursorPos(pos + 1);
+      if (!atMaxLines()) {
+        setInput(value.slice(0, pos) + "\n" + value.slice(pos));
+        setCursorPos(pos + 1);
+      }
     } else if (key.name === "return") {
       const exactCommand = commands.find((item) => item.command.trim() === value.trim());
       const exactSuggestion = suggestions.find((item) => item.command.trim() === value.trim());
@@ -2315,7 +2335,7 @@ const showTokenUsage = () => terminal().width >= 48;
           </box>
           <box flexDirection="row" alignItems="center" justifyContent="flex-end" gap={1} flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
             <box flexShrink={1} minWidth={0} overflow="hidden">
-              <text fg={colors.lavender} wrapMode="none" truncate={true} width="100%">{getSessionTitle()}</text>
+              <text fg={colors.lavender} wrapMode="none" width="100%">{getSessionTitle()}</text>
             </box>
             <text fg={colors.rule} wrapMode="none" flexShrink={0}>│</text>
             <text fg={statusColor()} wrapMode="none" flexShrink={0}>
@@ -2327,44 +2347,62 @@ const showTokenUsage = () => terminal().width >= 48;
 
       <box flexDirection="row" gap={1} flexGrow={1} minWidth={0} minHeight={0} width="100%" overflow="hidden">
         <Show when={sidebarVisible()}>
-        <box flexDirection="column" backgroundColor={colors.panel} border={["right"]} borderColor={colors.rule} padding={1} width={sidebarMetrics().sidebarWidth} minWidth={scaledCells(28)} height="100%" minHeight={0} flexShrink={0} gap={1} overflow="hidden">
-          <box flexDirection="column" gap={0} flexShrink={0} onMouseDown={() => { setCatMenuOpen((open) => !open); setCatMenuIndex(0); setCatExpressionPicker(false); }}>
-            <box borderStyle="single" borderColor={colors.rule} padding={1} alignSelf="center" overflow="hidden">
-              <CatPortrait
-                height={sidebarMetrics().catHeight}
-                expression={catProfile().selectedExpression as CatExpressionId}
-                mood={catMood()}
-                frame={catFrame()}
-                animated={catProfile().animationsEnabled}
-              />
+        <box flexDirection="column" backgroundColor={colors.panel} border={["right"]} borderColor={colors.rule} padding={1} width={sidebarMetrics().sidebarWidth} minWidth={scaledCells(28)} height="100%" minHeight={0} flexShrink={0} gap={0} overflow="hidden">
+          <scrollbox flexGrow={1} minHeight={0} width="100%" overflow="hidden" verticalScrollbarOptions={{ visible: false }}>
+            <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0}>
+              <box flexDirection="column" gap={0} flexShrink={0} onMouseDown={() => { setCatMenuOpen((open) => !open); setCatMenuIndex(0); setCatExpressionPicker(false); }}>
+                <box borderStyle="single" borderColor={colors.rule} padding={1} alignSelf="center" overflow="hidden">
+                  <CatPortrait
+                    height={sidebarMetrics().catHeight}
+                    expression={catProfile().selectedExpression as CatExpressionId}
+                    mood={catMood()}
+                    frame={catFrame()}
+                    animated={catProfile().animationsEnabled}
+                  />
+                </box>
+                <text fg={colors.pink} textAlign="center">MINT THE CAT</text>
+                <text fg={colors.muted} textAlign="center">click or press F2 · /cat</text>
+              </box>
+              <text fg={colors.muted} width="100%" minWidth={0} flexShrink={0} wrapMode="none" truncate={true}>{catProfile().pets} pets · {catProfile().treats} treats</text>
+              <box border={["bottom"]} borderColor={colors.rule} width="100%" height={1} minHeight={1} />
+              <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none">SESSIONS</text>
+              <For each={allSessions()}>
+                {(s) => (
+                  <box
+                    flexDirection="column"
+                    gap={0}
+                    width="100%"
+                    minWidth={0}
+                    padding={1}
+                    backgroundColor={session() === s.id ? colors.lavender : "transparent"}
+                    onMouseUp={() => { if (session() !== s.id) resumeSession(s.id); }}
+                  >
+                    <text
+                      fg={session() === s.id ? colors.bg : colors.text}
+                      width="100%"
+                      minWidth={0}
+                      wrapMode="none"
+                      truncate={true}
+                    >
+                      {s.title || "unnamed"}
+                    </text>
+                    <text
+                      fg={session() === s.id ? colors.muted : colors.muted}
+                      width="100%"
+                      minWidth={0}
+                      wrapMode="none"
+                      truncate={true}
+                    >
+                      {displayModelName(s.model)} · {relativeTime(s.updated_at)}
+                    </text>
+                  </box>
+                )}
+              </For>
+              <Show when={!session()}>
+                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none">draft · saved on first message</text>
+              </Show>
             </box>
-            <text fg={colors.pink} textAlign="center">MINT THE CAT</text>
-            <text fg={colors.muted} textAlign="center">click or press F2 · /cat</text>
-          </box>
-          <text fg={colors.muted} width="100%" minWidth={0} flexShrink={0} wrapMode="none" truncate={true}>{catProfile().pets} pets · {catProfile().treats} treats</text>
-          <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0}>
-            <Show when={session()}>
-              <box border={["bottom"]} borderColor={colors.rule} width="100%" height={1} minHeight={1} />
-              <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none" truncate={true}>SESSION</text>
-              <text
-                fg={colors.text}
-                width="100%"
-                minWidth={0}
-                wrapMode="none"
-                truncate={true}
-                onMouseUp={(e) => { e.stopPropagation(); openRenamePopup(); }}
-              >
-                {getSessionTitle()}
-              </text>
-              <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>#{session()}</text>
-            </Show>
-            <Show when={!session()}>
-              <box border={["bottom"]} borderColor={colors.rule} width="100%" height={1} minHeight={1} />
-              <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none" truncate={true}>SESSION</text>
-              <text fg={colors.text} width="100%" minWidth={0} wrapMode="none" truncate={true}>{draftSessionTitle() || "new session"}</text>
-              <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>draft · saved on first message</text>
-            </Show>
-          </box>
+          </scrollbox>
         </box>
       </Show>
 
@@ -2480,8 +2518,15 @@ const showTokenUsage = () => terminal().width >= 48;
             </box>
           </Show>
           <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
-            <box backgroundColor={colors.bg} border={["top"]} borderColor={colors.rule} paddingLeft={1} paddingRight={1} paddingBottom={0} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
-              <text fg={colors.mint} width="100%" minWidth={0} wrapMode="char">❯ {input().slice(0, cursorPos())}<span style={{ fg: colors.bg, bg: colors.mint }}>{cursorGlyph()}</span>{input().slice(cursorPos() + cursorAdvance())}</text>
+            <box backgroundColor={colors.panel} border={["top"]} borderColor={colors.rule} paddingLeft={1} paddingRight={1} paddingBottom={0} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
+              {inputLines() > 1 ? (
+                <scrollbox height={Math.min(inputLines(), MAX_INPUT_LINES)} minHeight={1} width="100%" minWidth={0} overflow="hidden" stickyScroll={true} stickyStart="bottom">
+                  <text fg={colors.mint} wrapMode="char" width="100%">❯ {input().slice(0, cursorPos())}<span style={{ fg: colors.bg, bg: colors.mint }}>{cursorGlyph()}</span>{input().slice(cursorPos() + cursorAdvance())}</text>
+                </scrollbox>
+              ) : (
+                <text fg={colors.mint} width="100%" minWidth={0} wrapMode="char">❯ {input().slice(0, cursorPos())}<span style={{ fg: colors.bg, bg: colors.mint }}>{cursorGlyph()}</span>{input().slice(cursorPos() + cursorAdvance())}</text>
+              )}
+              <box height={0} />
                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>
                  <span style={{ fg: mode() === "plan" ? colors.pink : colors.mint }}>{mode() === "plan" ? "Plan" : "Build"}</span>
                  {terminal().width >= 60

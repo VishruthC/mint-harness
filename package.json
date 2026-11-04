@@ -5,7 +5,7 @@
   "type": "module",
   "main": "src/index.tsx",
   "bin": {
-    "mint": "./bin/mint.js"
+    "minth": "./src/index.tsx"
   },
   "scripts": {
     "dev": "bun --conditions=development src/index.tsx",

@@ -25,6 +25,7 @@ export type Session = {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
+  workspace?: string;
 };
 
 function defaultDbPath() {
@@ -73,6 +74,7 @@ export class SessionStore {
       ["prompt_tokens", "INTEGER NOT NULL DEFAULT 0"],
       ["completion_tokens", "INTEGER NOT NULL DEFAULT 0"],
       ["total_tokens", "INTEGER NOT NULL DEFAULT 0"],
+      ["workspace", "TEXT"],
     ];
     for (const [name, definition] of additions) {
       if (!sessionColumns.has(name)) this.db.exec(`ALTER TABLE sessions ADD COLUMN ${name} ${definition}`);
@@ -90,7 +92,10 @@ export class SessionStore {
     return (this.db.query("SELECT * FROM sessions WHERE id = ?").get(id) as Session | null) ?? null;
   }
 
-  listSessions(limit = 20): Session[] {
+  listSessions(limit = 20, workspace?: string): Session[] {
+    if (workspace) {
+      return this.db.query("SELECT * FROM sessions WHERE workspace = ? ORDER BY updated_at DESC LIMIT ?").all(workspace, limit) as Session[];
+    }
     return this.db.query("SELECT * FROM sessions ORDER BY updated_at DESC LIMIT ?").all(limit) as Session[];
   }
 
@@ -100,11 +105,11 @@ export class SessionStore {
     this.db.query("UPDATE sessions SET updated_at = ? WHERE id = ?").run(now, sessionId);
   }
 
-  createSessionWithMessage(model: string, message: StoredMessage, title?: string): Session {
+  createSessionWithMessage(model: string, message: StoredMessage, title?: string, workspace?: string): Session {
     const now = new Date().toISOString();
     const id = crypto.randomUUID().slice(0, 8);
     const sessionTitle = title && title.trim() ? title.trim().slice(0, 64) : message.content.trim().slice(0, 64);
-    this.db.query(`INSERT INTO sessions (id, title, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`).run(id, sessionTitle || "new session", model, now, now);
+    this.db.query(`INSERT INTO sessions (id, title, model, created_at, updated_at, workspace) VALUES (?, ?, ?, ?, ?, ?)`).run(id, sessionTitle || "new session", model, now, now, workspace ?? null);
     this.db.query("INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)").run(id, message.role, message.content, now);
     return this.getSession(id)!;
   }
