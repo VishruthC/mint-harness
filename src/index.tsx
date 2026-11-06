@@ -2526,7 +2526,7 @@ const showTokenUsage = () => terminal().width >= 48;
               ) : (
                 <text fg={colors.mint} width="100%" minWidth={0} wrapMode="char">❯ {input().slice(0, cursorPos())}<span style={{ fg: colors.bg, bg: colors.mint }}>{cursorGlyph()}</span>{input().slice(cursorPos() + cursorAdvance())}</text>
               )}
-              <box height={0} />
+              <box height={1} minHeight={1} />
                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>
                  <span style={{ fg: mode() === "plan" ? colors.pink : colors.mint }}>{mode() === "plan" ? "Plan" : "Build"}</span>
                  {terminal().width >= 60
