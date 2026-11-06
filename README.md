@@ -23,6 +23,26 @@ In `.env`, set `NVIDIA_API_KEY` to your NVIDIA API key. Optionally set `NVIDIA_M
 
 MINT uses `https://integrate.api.nvidia.com/v1` by default. Set `NVIDIA_MODEL` to a model ID you can access, or leave it blank and choose from the models returned by the API.
 
+## Global `minth` command
+
+After installing dependencies, register the global `minth` command:
+
+```powershell
+bun run install:minth
+```
+
+This installs a shim in Bun's global bin directory (`~/.bun/bin/minth.cmd` on Windows). The shim keeps MINT's own configuration (`.env`, model settings, source code) in the repository directory, but **passes your current working directory as the workspace** via `MINT_WORKSPACE`.
+
+Behavior:
+
+- Run `minth` from any directory on `C:`, `E:`, or any drive — MINT will operate on that directory.
+- The footer and `/workspace` show the launch directory.
+- Workspace tools (`/ls`, `/read`, `/search`, `/propose`, `/run`) target the launch directory.
+- MINT's own `.env`, API keys, and sessions remain in the repository (`K:\mint` by default).
+- Sessions are stored in `~/.mint/mint.sqlite` and filtered by workspace, so sessions from different directories don't mix.
+
+**Important:** If you ever run `bun link`, `bun install -g`, or reinstall the global package, the shim may be regenerated with a hardcoded `--cwd`. Re-run `bun run install:minth` to restore the correct behavior.
+
 ## Current commands
 
 - `/help` — show available commands
