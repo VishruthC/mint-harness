@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SessionStore } from "../src/storage";
+import { SessionStore, normalizeWorkspace } from "../src/storage";
 
 let directory = "";
 let store: SessionStore | undefined;
@@ -87,6 +87,61 @@ describe("SessionStore", () => {
     const longTitle = "a".repeat(100);
     store.renameSession(session.id, longTitle);
     expect(store.getSession(session.id)?.title.length).toBe(64);
+  });
+
+  test("scopes sessions to the exact workspace they were created in", () => {
+    directory = mkdtempSync(join(tmpdir(), "mint-test-"));
+    const workspaceA = join(directory, "project-a");
+    const workspaceB = join(directory, "project-b");
+    mkdirSync(workspaceA);
+    mkdirSync(workspaceB);
+    store = new SessionStore(join(directory, "test.sqlite"));
+
+    const first = store.createSessionWithMessage("model-x", { role: "user", content: "in a" }, undefined, workspaceA);
+    const second = store.createSessionWithMessage("model-x", { role: "user", content: "in b" }, undefined, workspaceB);
+
+    expect(store.listSessions(50, workspaceA).map((session) => session.id)).toEqual([first.id]);
+    expect(store.listSessions(50, workspaceB).map((session) => session.id)).toEqual([second.id]);
+    expect(store.listSessions(50, join(workspaceA, "subdirectory"))).toEqual([]);
+    expect(store.listSessions(50, directory)).toEqual([]);
+  });
+
+  test("normalizes workspace paths when storing and querying", () => {
+    directory = mkdtempSync(join(tmpdir(), "mint-test-"));
+    const workspace = join(directory, "project");
+    mkdirSync(workspace);
+    store = new SessionStore(join(directory, "test.sqlite"));
+    const session = store.createSessionWithMessage("model-x", { role: "user", content: "hello" }, undefined, `${workspace}/`);
+
+    expect(store.listSessions(50, workspace).map((item) => item.id)).toEqual([session.id]);
+    expect(store.listSessions(50, normalizeWorkspace(workspace)).map((item) => item.id)).toEqual([session.id]);
+  });
+
+  test("backfills legacy sessions with the current workspace once", () => {
+    directory = mkdtempSync(join(tmpdir(), "mint-test-"));
+    const workspace = join(directory, "legacy-project");
+    mkdirSync(workspace);
+    const path = join(directory, "test.sqlite");
+    const db = new Database(path);
+    db.exec(`
+      CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL, model TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE cat_profile (id INTEGER PRIMARY KEY CHECK (id = 1), pets INTEGER NOT NULL DEFAULT 0, treats INTEGER NOT NULL DEFAULT 0, selected_expression TEXT NOT NULL DEFAULT 'idle', animations_enabled INTEGER NOT NULL DEFAULT 1, unlocked_expressions TEXT NOT NULL DEFAULT '["idle","happy"]');
+      INSERT INTO cat_profile (id) VALUES (1);
+    `);
+    db.query("INSERT INTO sessions (id, title, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run("legacy", "title", "model-a", "2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+    db.close();
+
+    const previous = process.env.MINT_WORKSPACE;
+    process.env.MINT_WORKSPACE = workspace;
+    try {
+      store = new SessionStore(path);
+      expect(store.listSessions(50, workspace).map((session) => session.id)).toEqual(["legacy"]);
+      expect(store.getSession("legacy")?.workspace).toBe(normalizeWorkspace(workspace));
+    } finally {
+      if (previous === undefined) delete process.env.MINT_WORKSPACE;
+      else process.env.MINT_WORKSPACE = previous;
+    }
   });
 });
 test("tracks token usage per session", () => {
