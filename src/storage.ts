@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
-import { chmodSync, mkdirSync, realpathSync } from "node:fs";
+import { chmodSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { TokenUsage } from "./usage";
 
 export type StoredMessage = {
@@ -32,15 +32,6 @@ function defaultDbPath() {
   const root = process.env.MINT_DATA_DIR || join(homedir(), ".mint");
   mkdirSync(root, { recursive: true, mode: 0o700 });
   return join(root, "mint.sqlite");
-}
-
-export function normalizeWorkspace(workspace: string): string {
-  const resolved = resolve(workspace);
-  try {
-    return realpathSync.native(resolved);
-  } catch {
-    return resolved;
-  }
 }
 
 export class SessionStore {
@@ -88,15 +79,6 @@ export class SessionStore {
     for (const [name, definition] of additions) {
       if (!sessionColumns.has(name)) this.db.exec(`ALTER TABLE sessions ADD COLUMN ${name} ${definition}`);
     }
-
-    // Sessions created before workspace scoping have no directory attached.
-    // Attach them once to the current workspace so they are not lost.
-    const userVersion = (this.db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
-    if (userVersion < 1) {
-      const legacyWorkspace = normalizeWorkspace(process.env.MINT_WORKSPACE || process.cwd());
-      this.db.query("UPDATE sessions SET workspace = ? WHERE workspace IS NULL").run(legacyWorkspace);
-      this.db.exec("PRAGMA user_version = 1");
-    }
   }
 
   createSession(model = "", title = "New session") {
@@ -112,8 +94,7 @@ export class SessionStore {
 
   listSessions(limit = 20, workspace?: string): Session[] {
     if (workspace) {
-      const key = normalizeWorkspace(workspace);
-      return this.db.query("SELECT * FROM sessions WHERE workspace = ? ORDER BY updated_at DESC LIMIT ?").all(key, limit) as Session[];
+      return this.db.query("SELECT * FROM sessions WHERE workspace = ? ORDER BY updated_at DESC LIMIT ?").all(workspace, limit) as Session[];
     }
     return this.db.query("SELECT * FROM sessions ORDER BY updated_at DESC LIMIT ?").all(limit) as Session[];
   }
@@ -128,8 +109,7 @@ export class SessionStore {
     const now = new Date().toISOString();
     const id = crypto.randomUUID().slice(0, 8);
     const sessionTitle = title && title.trim() ? title.trim().slice(0, 64) : message.content.trim().slice(0, 64);
-    const workspaceKey = workspace ? normalizeWorkspace(workspace) : null;
-    this.db.query(`INSERT INTO sessions (id, title, model, created_at, updated_at, workspace) VALUES (?, ?, ?, ?, ?, ?)`).run(id, sessionTitle || "new session", model, now, now, workspaceKey);
+    this.db.query(`INSERT INTO sessions (id, title, model, created_at, updated_at, workspace) VALUES (?, ?, ?, ?, ?, ?)`).run(id, sessionTitle || "new session", model, now, now, workspace ?? null);
     this.db.query("INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)").run(id, message.role, message.content, now);
     return this.getSession(id)!;
   }

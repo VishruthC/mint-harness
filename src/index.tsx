@@ -4,7 +4,7 @@ import { loadConfig, writeDotEnv, updateDotEnvModel, updateDotEnvAutoApply, type
 import { AgentTurnBudget, formatAgentLimits, formatLimitMessage, RepeatedCallGuard } from "./agent-loop";
 import { NvidiaClient, type ChatMessage, type NvidiaModel, type ToolCall } from "./nvidia";
 import { buildSystemPrompt, executeModelTool, getCapabilities, getModelTools } from "./agent-tools";
-import { SessionStore, normalizeWorkspace, type StoredMessage, type Session } from "./storage";
+import { SessionStore, type StoredMessage, type Session } from "./storage";
 import { WorkspaceTools } from "./tools";
 import { ApprovedTerminal } from "./terminal";
 import { EMPTY_TOKEN_USAGE, addTokenUsage, formatTokenCount, type TokenUsage } from "./usage";
@@ -45,7 +45,6 @@ import type { CliRenderer } from "@opentui/core";
 import { parseMessageSegments, parseDiffBlock, type MessageSegment } from "./message-segments";
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
-import { resolve } from "node:path";
 
 const colors = {
   bg: "#1e1e2e",
@@ -428,7 +427,6 @@ function App() {
   const [notice, setNotice] = createSignal("Connecting to NVIDIA…");
   let workspaceTools: WorkspaceTools | undefined;
   let terminalTools: ApprovedTerminal | undefined;
-  const [workspacePath, setWorkspacePath] = createSignal(resolve(process.env.MINT_WORKSPACE || process.cwd()));
   let agentLimits = { maxToolRounds: 12, maxToolCallsPerTurn: 24 };
   let pendingProposalId: string | undefined;
   let pendingCommandId: string | undefined;
@@ -440,7 +438,7 @@ function App() {
     role: "system",
     content: buildSystemPrompt(
       Boolean(workspaceTools),
-      workspacePath(),
+      workspaceTools?.root,
       agentLimits,
       m,
       { modeTransition, pendingProposalId, pendingCommandId, lastApproval, autoApply }
@@ -548,11 +546,9 @@ function App() {
   let awaitingWritePath: string | undefined;
   void WorkspaceTools.create().then((tools) => {
     workspaceTools = tools;
-    setWorkspacePath(tools.root);
     terminalTools = new ApprovedTerminal(tools.root);
     setWorkspaceBranch(detectGitBranch(tools.root));
     setNotice(`workspace: ${tools.root}`);
-    refreshSessions();
   }).catch((error) => {
     setNotice(error instanceof Error ? error.message : "Workspace initialization failed");
   });
@@ -658,7 +654,7 @@ function App() {
 
   const workspaceRoot = () => {
     try {
-      return workspacePath();
+      return workspaceTools?.root || process.cwd();
     } catch {
       return process.cwd();
     }
@@ -692,12 +688,7 @@ const showTokenUsage = () => terminal().width >= 48;
     return "…" + full.slice(full.length - available + 1);
   };
 
-  const [sessionsRevision, setSessionsRevision] = createSignal(0);
-  const refreshSessions = () => setSessionsRevision((value) => value + 1);
-  const allSessions = createMemo(() => {
-    sessionsRevision();
-    return store.listSessions(50, workspaceRoot());
-  });
+  const allSessions = () => store.listSessions(50, workspaceTools?.root);
 
   const relativeTime = (iso: string) => {
     const diff = Date.now() - new Date(iso).getTime();
@@ -759,11 +750,10 @@ const showTokenUsage = () => terminal().width >= 48;
       store.addMessage(sid, message);
     } else {
       // First message - create session with the message
-      const newSession = store.createSessionWithMessage(model(), message, draftSessionTitle() || undefined, workspaceRoot());
+      const newSession = store.createSessionWithMessage(model(), message, draftSessionTitle() || undefined, workspaceTools?.root);
       setSession(newSession.id);
       setDraftSessionTitle("");
     }
-    refreshSessions();
   };
 
   const startNewSession = () => {
@@ -778,7 +768,6 @@ const showTokenUsage = () => terminal().width >= 48;
     awaitingWritePath = undefined;
     modeTransition = undefined;
     lastApproval = undefined;
-    refreshSessions();
     // Note: autoApply persists across sessions
     setSessionTokens({ ...EMPTY_TOKEN_USAGE });
   };
@@ -787,15 +776,6 @@ const showTokenUsage = () => terminal().width >= 48;
     const found = store.getSession(id);
     if (!found) {
       setMessages((old) => [...old, { role: "assistant", content: `No session found with ID ${id}. Use /session to list sessions.` }]);
-      return;
-    }
-    const currentWorkspace = normalizeWorkspace(workspaceRoot());
-    if (!found.workspace) {
-      setMessages((old) => [...old, { role: "assistant", content: `Session ${id} has no workspace record and cannot be opened.` }]);
-      return;
-    }
-    if (normalizeWorkspace(found.workspace) !== currentWorkspace) {
-      setMessages((old) => [...old, { role: "assistant", content: `Session ${id} belongs to ${found.workspace}. Launch MINT from that directory to open it.` }]);
       return;
     }
     const stored = store.getMessages(id);
@@ -812,7 +792,6 @@ const showTokenUsage = () => terminal().width >= 48;
     modeTransition = undefined;
     lastApproval = undefined;
     setSessionTokens(store.getSessionTokenUsage(id));
-    refreshSessions();
   };
 
   const refreshModels = async () => {
@@ -1102,7 +1081,6 @@ const showTokenUsage = () => terminal().width >= 48;
     configuredModel = modelId;
     if (session()) {
       store.updateModel(session()!, modelId);
-      refreshSessions();
     }
     setNotice(`Model set to ${modelId} · saved to .env`);
     showToast(`♡ model → ${modelId} · saved to .env`);
@@ -1216,7 +1194,6 @@ const showTokenUsage = () => terminal().width >= 48;
       store.renameSession(sid, title);
       setDraftSessionTitle(title);
       setSessionTitleRevision((v) => v + 1);
-      refreshSessions();
       setNotice(`Session renamed to "${title}"`);
       showToast(`♡ session renamed: ${title}`);
     } else {
@@ -1280,7 +1257,6 @@ const showTokenUsage = () => terminal().width >= 48;
     if (sub === "delete" && parts[2]) {
       const id = parts[2];
       store.deleteSession(id);
-      refreshSessions();
       setMessages((old) => [...old, { role: "assistant", content: `Session ${id} deleted.` }]);
       setNotice(`session ${id} deleted`);
       return;
@@ -1298,7 +1274,6 @@ const showTokenUsage = () => terminal().width >= 48;
           store.renameSession(sid, normalized);
           setDraftSessionTitle(normalized);
           setSessionTitleRevision((v) => v + 1);
-          refreshSessions();
           setNotice(`Session renamed to "${normalized}"`);
           showToast(`♡ session renamed: ${normalized}`);
         } else {
@@ -1316,7 +1291,7 @@ const showTokenUsage = () => terminal().width >= 48;
   };
 
   const openSessionPicker = () => {
-    const sessions = store.listSessions(50, workspaceRoot());
+    const sessions = store.listSessions(50, workspaceTools?.root);
     setSessionPickerSessions(sessions);
     setSessionPickerQuery("");
     setSessionPickerHoverIndex(-1);
@@ -1673,7 +1648,7 @@ const showTokenUsage = () => terminal().width >= 48;
     if (text === "/capabilities") {
       const capabilities = getCapabilities(Boolean(workspaceTools));
       const listing = capabilities.map((item) => `${item.available ? "[available]" : "[unavailable]"} ${item.id} — ${item.description}`).join("\n");
-      setMessages((old) => [...old, { role: "assistant", content: `MINT harness capabilities\nWorkspace: ${workspaceTools ? workspaceRoot() : "not ready"}\n\n${listing}\n\n${formatAgentLimits(agentLimits)}` }]);
+      setMessages((old) => [...old, { role: "assistant", content: `MINT harness capabilities\nWorkspace: ${workspaceTools?.root ?? "not ready"}\n\n${listing}\n\n${formatAgentLimits(agentLimits)}` }]);
       return;
     }
     if (text === "/limits") {
@@ -2398,8 +2373,7 @@ const showTokenUsage = () => terminal().width >= 48;
                     gap={0}
                     width="100%"
                     minWidth={0}
-                    paddingLeft={1}
-                    paddingRight={1}
+                    padding={1}
                     backgroundColor={session() === s.id ? colors.lavender : "transparent"}
                     onMouseUp={() => { if (session() !== s.id) resumeSession(s.id); }}
                   >
@@ -2410,10 +2384,10 @@ const showTokenUsage = () => terminal().width >= 48;
                       wrapMode="none"
                       truncate={true}
                     >
-                      {(session() === s.id ? "❯ " : "  ") + (s.title || "unnamed")}
+                      {s.title || "unnamed"}
                     </text>
                     <text
-                      fg={session() === s.id ? colors.bg : colors.muted}
+                      fg={session() === s.id ? colors.muted : colors.muted}
                       width="100%"
                       minWidth={0}
                       wrapMode="none"
@@ -2424,9 +2398,6 @@ const showTokenUsage = () => terminal().width >= 48;
                   </box>
                 )}
               </For>
-              <Show when={allSessions().length === 0}>
-                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none">no sessions in this directory</text>
-              </Show>
               <Show when={!session()}>
                 <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none">draft · saved on first message</text>
               </Show>

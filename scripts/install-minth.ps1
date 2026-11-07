@@ -71,7 +71,7 @@ $repoRootEscaped = $repoRoot -replace '\\', '\\'
 $shimContent = @"
 @echo off
 setlocal
-set "MINT_WORKSPACE=%CD%"
+if not defined MINT_WORKSPACE set "MINT_WORKSPACE=%CD%"
 bun --cwd "$repoRootEscaped" src/index.tsx %*
 endlocal & exit /b %ERRORLEVEL%
 "@
