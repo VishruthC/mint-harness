@@ -12,8 +12,7 @@
     "start": "bun src/index.tsx",
     "typecheck": "tsc --noEmit",
     "test": "bun test tests/agent-loop.test.ts tests/agent-tools.test.ts tests/cat.test.ts tests/cat-art.test.ts tests/config.test.ts tests/nvidia.test.ts tests/storage.test.ts tests/terminal.test.ts tests/tools.test.ts tests/connect.test.ts tests/usage.test.ts tests/message-segments.test.ts tests/models.test.ts",
-    "check:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows.ps1",
-    "install:minth": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-minth.ps1"
+    "check:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows.ps1"
   },
   "dependencies": {
     "@opentui/core": "0.7.0",

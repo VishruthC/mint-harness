@@ -105,9 +105,8 @@
     <main id="main" tabindex="-1">
       <!-- 00 — HERO -->
       <section id="top" class="hero" data-section="top">
-        <div class="hero-field" aria-hidden="true" data-hero-field>
+        <div class="hero-field" aria-hidden="true">
           <span class="hero-field-grid"></span>
-          <canvas class="hero-field-canvas" data-hero-dots aria-hidden="true"></canvas>
           <span class="hero-field-label">FIELD NOTES / 00</span>
         </div>
 
@@ -227,7 +226,9 @@
                       <span class="tui-add">+</span> if (!token) throw new AuthError("missing token")
                     </div>
                     <div class="tui-line tui-line--wait" data-line="7">
-                      <span class="tui-tool">·</span> awaiting <span class="tui-key">/apply</span>
+                      <span class="tui-tool">·</span> awaiting <span class="tui-key">/apply</span><span
+                        class="tui-caret tui-caret--inline"
+                      ></span>
                     </div>
                   </div>
 

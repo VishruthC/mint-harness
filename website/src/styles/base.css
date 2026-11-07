@@ -266,10 +266,6 @@ mark {
   max-width: 12ch;
 }
 
-.chapter-head--split .chapter-number {
-  margin-bottom: 10px;
-}
-
 .chapter-kicker {
   max-width: 45ch;
   color: var(--muted);
