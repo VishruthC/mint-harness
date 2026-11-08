@@ -12,12 +12,40 @@ A cute, terminal-native coding harness inspired by OpenCode's architecture, inde
 
 ## Start
 
+Clone the harness once, install dependencies, add your key, and launch the first chat.
+
+**PowerShell**
+
 ```powershell
+git clone https://github.com/VishruthC/mint-harness.git
+cd mint-harness
 bun install
 Copy-Item .env.example .env
 notepad .env
-bun run dev
+bun run install:minth
+bun run first-chat
 ```
+
+**macOS / Linux**
+
+```bash
+git clone https://github.com/VishruthC/mint-harness.git
+cd mint-harness
+bun install
+cp .env.example .env
+${EDITOR:-nano} .env
+bun run install:minth
+bun run first-chat
+```
+
+`bun run first-chat` creates `initial chat` inside the harness directory and starts MINT there. After that, run `minth` from any project directory:
+
+```bash
+cd ~/Projects/my-app
+minth
+```
+
+MINT uses the directory you launch it from as the workspace and only shows sessions created in that exact directory. The harness's own `.env` and dependencies stay in the cloned `mint-harness` directory. If you move the cloned folder, rerun `bun run install:minth` so `minth` points at the new location.
 
 In `.env`, set `NVIDIA_API_KEY` to your NVIDIA API key. Optionally set `NVIDIA_MODEL` to a model ID available to your account. `MINT_MAX_TOOL_ROUNDS` and `MINT_MAX_TOOL_CALLS_PER_TURN` configure the per-user-turn agent limits (defaults: `12` rounds and `24` calls); both must be positive integers. **Changes require a restart of MINT.** Do not share or commit `.env`.
 
@@ -154,11 +182,14 @@ MINT supports targeted exact-text patch proposals for small edits and a full-fil
 
 MINT does not write the target file while preparing the preview. It rejects sensitive filenames, unrecognized/binary file types, paths outside the workspace, symlink targets, and oversized content. Before applying, it checks whether the original file changed since preview. Restricted terminal commands require a preview and explicit `/run` approval. Review every diff carefully before approving it.
 
-Set a workspace before launch, for example:
+Launch MINT from the directory you want it to work in:
 
 ```bash
-MINT_WORKSPACE="$HOME/Projects/my-app" bun run dev
+cd "$HOME/Projects/my-app"
+minth
 ```
+
+For source development, `MINT_WORKSPACE="$HOME/Projects/my-app" bun run dev` still works.
 
 
 ## Harness-aware agent tools

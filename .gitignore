@@ -1,8 +1,11 @@
 node_modules/
 dist/
+initial chat/
 .env
 .env.*
 !.env.example
 *.log
 .DS_Store
 test-diff.tsx
+.agents/
+.claude/

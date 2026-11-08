@@ -26,5 +26,5 @@ if (-not (Test-Path 'node_modules')) {
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
-bun run dev
+bun run first-chat
 exit $LASTEXITCODE

@@ -977,8 +977,9 @@ output capped at 24,000 characters</code></pre>
             </ul>
 
             <p class="install-note" data-reveal>
-              Your key stays in <code>.env</code>. MINT never writes it to chat history, logs, or
-              SQLite.
+              The last command creates <code>initial chat</code> and launches MINT there. Later, run
+              <code>minth</code> from any directory. Your key stays in <code>.env</code>; MINT never
+              writes it to chat history, logs, or SQLite.
             </p>
           </div>
 
@@ -1020,7 +1021,8 @@ cd mint-harness
 bun install
 Copy-Item .env.example .env
 notepad .env
-bun run dev</code></pre>
+bun run install:minth
+bun run first-chat</code></pre>
             </div>
 
             <div
@@ -1035,12 +1037,13 @@ bun run dev</code></pre>
 cd mint-harness
 bun install
 cp .env.example .env
-$EDITOR .env
-bun run dev</code></pre>
+${EDITOR:-nano} .env
+bun run install:minth
+bun run first-chat</code></pre>
             </div>
 
             <div class="install-card-foot">
-              <span>set <code>NVIDIA_API_KEY</code> in .env</span>
+              <span>set <code>NVIDIA_API_KEY</code> in .env · launch anywhere with <code>minth</code></span>
               <button class="copy-button" type="button" data-copy-install>copy</button>
             </div>
 
