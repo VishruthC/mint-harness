@@ -14,6 +14,7 @@ import { initApproval } from "./features/approval";
 import { initCatPlayground } from "./features/cat";
 import { initCommandDemo } from "./features/command";
 import { initHero } from "./features/hero";
+import { initHeroDots } from "./features/hero-dots";
 import { initIndex } from "./features/index";
 import { initInstall } from "./features/install";
 import { initLoop } from "./features/loop";
@@ -34,6 +35,7 @@ function boot(): void {
   const motionReady = safe("page motion", initPageMotion);
 
   safe("hero", initHero);
+  safe("hero dots", initHeroDots);
   safe("loop scene", initLoop);
   safe("read specimen", initReadDemo);
   safe("approval scene", initApproval);
