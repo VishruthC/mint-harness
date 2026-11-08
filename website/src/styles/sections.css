@@ -13,6 +13,23 @@
   color: var(--terminal-text);
   box-shadow: 14px 14px 0 rgba(26, 24, 34, 0.1);
   font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+/* Bold type across the terminal and demo interfaces. */
+.file-card,
+.diff-card,
+.command-card,
+.command-output,
+.sqlite-snippet,
+.cat-stage,
+.install-card {
+  font-weight: 700;
+}
+
+.diff-card .diff-line b,
+.cat-stage .cat-stage-foot b {
+  font-weight: 700;
 }
 
 .tui-top {
@@ -281,7 +298,7 @@
 }
 
 .tui-input-text {
-  color: var(--terminal-muted);
+  color: var(--terminal-mint);
 }
 
 @keyframes caret-blink {

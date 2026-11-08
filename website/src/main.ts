@@ -1,6 +1,7 @@
 import "@fontsource-variable/newsreader/wght.css";
 import "@fontsource-variable/newsreader/wght-italic.css";
 import "@fontsource/victor-mono/latin-400.css";
+import "@fontsource/victor-mono/latin-700.css";
 
 import "./styles/tokens.css";
 import "./styles/base.css";

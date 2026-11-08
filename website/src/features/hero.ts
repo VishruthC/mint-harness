@@ -63,7 +63,53 @@ export function initHero(): void {
 
     await sleep(340);
     if (!alive()) return;
-    showLines(1);
+
+    const question =
+      lines[0]?.querySelectorAll("span")[1]?.textContent?.trim() ??
+      "where is the session token validated?";
+
+    if (input) {
+      input.classList.add("is-visible");
+      input.textContent = "";
+
+      for (const char of question) {
+        if (!alive()) return;
+        input.textContent += char;
+        await sleep(28);
+      }
+
+      if (!alive()) return;
+
+      const startRect = input.getBoundingClientRect();
+      const endRect = lines[0].getBoundingClientRect();
+      const deltaY = endRect.top - startRect.top;
+
+      const slide = input.animate(
+        [
+          { transform: "translateY(0px)", opacity: 1 },
+          { transform: `translateY(${deltaY}px)`, opacity: 1 },
+        ],
+        {
+          duration: 360,
+          easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+          fill: "forwards",
+        },
+      );
+
+      await new Promise<void>((resolve) => {
+        slide.onfinish = () => resolve();
+        slide.oncancel = () => resolve();
+      });
+
+      if (!alive()) return;
+
+      slide.cancel();
+      input.classList.remove("is-visible");
+      input.textContent = "";
+      lines[0].classList.add("is-visible");
+    } else {
+      showLines(1);
+    }
 
     await sleep(420);
     if (!alive()) return;
