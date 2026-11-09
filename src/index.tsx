@@ -8,10 +8,10 @@ import { SessionStore, normalizeWorkspace, type StoredMessage, type Session } fr
 import { WorkspaceTools } from "./tools";
 import { ApprovedTerminal } from "./terminal";
 import { EMPTY_TOKEN_USAGE, addTokenUsage, formatTokenCount, type TokenUsage } from "./usage";
-import { CAT_EXPRESSIONS, catProfileSummary, feedCat, petCat, selectCatExpression, type CatMood, type CatExpressionId } from "./cat";
-import { CatPortrait } from "./cat-portrait";
-import { renderCatFrame, CAT_ART_SIZE, CAT_ART_FRAMES, type CatExpression } from "./cat-art";
-import type { CatProfile } from "./storage";
+import { catLineArtRows } from "./cat-line-art.ts";
+import { CatCompanion } from "./cat/widget.tsx";
+import { StateMapper } from "./cat/state-mapper.ts";
+import type { CatState } from "./cat/types.ts";
 import {
   MAX_PASTE_CHARS,
   sanitizePastedText,
@@ -58,6 +58,9 @@ const colors = {
   peach: "#fab387",
   red: "#f38ba8",
   rule: "#3c3c50",
+  // Muted lavender-grey for the line-art mascot. The terminal background
+  // itself is never painted — the glyphs inherit colors.bg.
+  catLine: "#777184",
 };
 const DIFF_ADD_BG = "#21362a";
 const DIFF_REMOVE_BG = "#3a2430";
@@ -334,11 +337,6 @@ function App() {
   const commandLimit = () => Math.max(1, Math.min(7, terminal().height - 20));
   const commands = [
     { command: "/help", description: "Show all commands" },
-    { command: "/cat", description: "Open the interactive MINT cat menu" },
-    { command: "/pet", description: "Pet the MINT cat" },
-    { command: "/feed", description: "Give MINT a pixel treat" },
-    { command: "/expressions", description: "View and unlock cat expressions" },
-    { command: "/expression ", description: "Equip an unlocked cat expression" },
     { command: "/models", description: "List NVIDIA models" },
     { command: "/model", description: "Choose a model (opens picker)" },
     { command: "/retry", description: "Retry the last user message" },
@@ -435,6 +433,7 @@ function App() {
   let modeTransition: { from: "plan" | "build"; to: "plan" | "build" } | undefined;
   let lastApproval: { kind: "file" | "command"; id: string; status: string; automatic?: boolean } | undefined;
   let autoApply: "manual" | "auto" = "manual";
+  let catPrefs: MintConfig["cat"] | null = null;
   
   const systemMessage = (m: "plan" | "build" = mode()): ChatMessage => ({
     role: "system",
@@ -448,13 +447,17 @@ function App() {
   });
   const [history, setHistory] = createSignal<ChatMessage[]>([systemMessage()]);
   const store = new SessionStore();
-  const [catProfile, setCatProfile] = createSignal<CatProfile>(store.getCatProfile());
-  const [catMood, setCatMood] = createSignal<CatMood>("idle");
-  const [catFrame, setCatFrame] = createSignal(0);
-  const [catMenuOpen, setCatMenuOpen] = createSignal(false);
-  const [catMenuIndex, setCatMenuIndex] = createSignal(0);
-  const [catExpressionPicker, setCatExpressionPicker] = createSignal(false);
-  const [catExpressionIndex, setCatExpressionIndex] = createSignal(0);
+  const [catPhase, setCatPhase] = createSignal(0);
+  const [catState, setCatState] = createSignal<CatState>("hi");
+  const catMapper = new StateMapper();
+  let talkedThisTurn = false;
+  const catEvent = (event: Parameters<StateMapper["handle"]>[0]) => {
+    setCatState(catMapper.handle(event, Date.now()).state);
+  };
+  const tickCat = () => {
+    setCatState(catMapper.tick(Date.now()).state);
+  };
+  let successTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Connect popup state
   const [connectOpen, setConnectOpen] = createSignal(false);
@@ -494,57 +497,7 @@ function App() {
     );
   });
 
-  const catMenuItems = [
-    { label: "Pet the cat", shortcut: "1", detail: "Give MINT some affection" },
-    { label: "Feed a treat", shortcut: "2", detail: "Spend a pixel treat" },
-    { label: "Expressions", shortcut: "3", detail: "Choose an unlocked look" },
-    { label: "Animations", shortcut: "4", detail: "Turn motion on or off" },
-    { label: "Close menu", shortcut: "5", detail: "Return to chat" },
-  ];
-  const saveCatProfile = (next: CatProfile) => {
-    setCatProfile(next);
-    store.updateCatProfile(next);
-  };
-  const showCatExpressions = () => {
-    const profile = catProfile();
-    const listing = CAT_EXPRESSIONS.map((expression, index) => {
-      const unlocked = profile.unlockedExpressions.includes(expression.id);
-      return `${unlocked ? "[unlocked]" : "[locked]  "} ${index + 1}. ${expression.label} (${expression.id}) — ${unlocked ? "available" : expression.unlock}`;
-    }).join("\n");
-    setMessages((old) => [...old, { role: "assistant", content: `MINT CAT EXPRESSIONS\n${listing}\n\nUse /expression <id> to equip an unlocked expression.\n${catProfileSummary(profile)}` }]);
-  };
-  const equipCatExpression = (expressionId: string) => {
-    const expression = CAT_EXPRESSIONS.find((item) => item.id === expressionId);
-    if (!expression) return;
-    if (!catProfile().unlockedExpressions.includes(expression.id)) {
-      setMessages((old) => [...old, { role: "assistant", content: `That expression is locked: ${expression.unlock}. Give the cat some affection or treats first.` }]);
-      setNotice(`locked: ${expression.label}`);
-      return;
-    }
-    const next = selectCatExpression(catProfile(), expression.id);
-    saveCatProfile(next);
-    setCatMood(expression.id === "zoomies" ? "zoomies" : expression.id === "love" ? "love" : "happy");
-    setCatExpressionPicker(false);
-    setCatMenuOpen(false);
-    setMessages((old) => [...old, { role: "assistant", content: `Expression equipped: ${expression.label} ♡` }]);
-    setNotice(`expression: ${expression.label}`);
-  };
-  const runCatAction = (action: "pet" | "feed" | "expressions" | "toggle-animations" | "close") => {
-    if (action === "close") { setCatExpressionPicker(false); setCatMenuOpen(false); setNotice("cat menu closed"); return; }
-    if (action === "expressions") { setCatExpressionPicker(true); setCatExpressionIndex(0); setNotice("choose an unlocked cat expression"); return; }
-    if (action === "toggle-animations") {
-      const next = { ...catProfile(), animationsEnabled: !catProfile().animationsEnabled };
-      saveCatProfile(next);
-      setCatMood("happy");
-      setMessages((old) => [...old, { role: "assistant", content: `Animations ${next.animationsEnabled ? "enabled" : "disabled"}. ${next.animationsEnabled ? "*tail wiggle resumed*" : "MINT will stay still for a bit."}` }]);
-      return;
-    }
-    const result = action === "pet" ? petCat(catProfile()) : feedCat(catProfile());
-    saveCatProfile(result.profile);
-    setCatMood(result.mood);
-    setMessages((old) => [...old, { role: "assistant", content: `[MINT CAT] ${result.message}${result.unlocked.length ? `\n\n✨ New expression unlocked: ${result.unlocked.map((id) => CAT_EXPRESSIONS.find((item) => item.id === id)?.label ?? id).join(", ")}! Use /expressions to equip it.` : ""}\n${catProfileSummary(result.profile)}` }]);
-    setNotice(action === "pet" ? "the cat is purring ♡" : "treat accepted 🍪");
-  };
+
   let awaitingWritePath: string | undefined;
   void WorkspaceTools.create().then((tools) => {
     workspaceTools = tools;
@@ -582,17 +535,9 @@ function App() {
   const sidebarVisible = () => terminal().width >= 100;
   const sidebarMetrics = () => {
     const w = terminal().width;
-    const h = terminal().height;
-    if (w >= 160) {
-      const catH = Math.min(scaledCells(20), Math.max(scaledCells(6), h - 18));
-      return { visible: w >= 100, sidebarWidth: scaledCells(44), catHeight: catH };
-    }
-    if (w >= 128) {
-      const catH = Math.min(scaledCells(16), Math.max(scaledCells(6), h - 18));
-      return { visible: w >= 100, sidebarWidth: scaledCells(36), catHeight: catH };
-    }
-    const catH = Math.min(scaledCells(12), Math.max(scaledCells(6), h - 18));
-    return { visible: w >= 100, sidebarWidth: scaledCells(32), catHeight: catH };
+    if (w >= 160) return { visible: w >= 100, sidebarWidth: scaledCells(44) };
+    if (w >= 128) return { visible: w >= 100, sidebarWidth: scaledCells(36) };
+    return { visible: w >= 100, sidebarWidth: scaledCells(32) };
   };
 
   // Model picker state
@@ -612,12 +557,12 @@ function App() {
   const chatWidth = () => Math.max(0, terminal().width - (sidebarVisible() ? sidebarMetrics().sidebarWidth + 5 : 6));
   const inputHint = () =>
     chatWidth() >= 114
-      ? "Enter send · Shift+Enter newline · F2 cat · Ctrl+Shift+V paste · select to copy · /retry · /cancel"
+      ? "Enter send · Shift+Enter newline · Ctrl+Shift+V paste · select to copy · /retry · /cancel"
       : chatWidth() >= 84
-        ? "Enter send · Shift+Enter newline · F2 cat · Ctrl+Shift+V paste · /retry · /cancel"
+        ? "Enter send · Shift+Enter newline · Ctrl+Shift+V paste · /retry · /cancel"
         : chatWidth() >= 58
-          ? "Enter send · F2 cat · Ctrl+Shift+V · /cancel"
-          : "Enter send · F2 cat · /cancel";
+          ? "Enter send · Ctrl+Shift+V · /cancel"
+          : "Enter send · /cancel";
   const footerText = () =>
     terminal().width >= 78
       ? "Harness-aware tools · approval-gated file edits · NVIDIA NIM · made with ♡"
@@ -769,6 +714,7 @@ const showTokenUsage = () => terminal().width >= 48;
   const startNewSession = () => {
     setSession(null);
     setDraftSessionTitle("");
+    catEvent({ type: "sessionWaiting" });
     setHistory([systemMessage()]);
     setMessages([{ role: "assistant", content: `Fresh session! Send a message to save it. ♡` }]);
     setNotice("draft session ready");
@@ -1021,6 +967,7 @@ const showTokenUsage = () => terminal().width >= 48;
         maxToolCallsPerTurn: agentLimits.maxToolCallsPerTurn,
         effort: "max",
         autoApply: "manual",
+        cat: { enabled: true, assetPack: "default", renderer: "auto", animation: true, scale: 1, idleFps: 0, workingFps: 0 },
       };
       writeDotEnv(mergedConfig);
 
@@ -1392,24 +1339,6 @@ const showTokenUsage = () => terminal().width >= 48;
       renderer.destroy();
       return;
     }
-    if (text === "/cat") {
-      setCatMenuOpen((open) => !open);
-      setCatExpressionPicker(false);
-      setCatMenuIndex(0);
-      setNotice(catMenuOpen() ? "cat menu closed" : "cat menu opened · use ↑/↓ and Enter");
-      return;
-    }
-    if (text === "/pet") { runCatAction("pet"); return; }
-    if (text === "/feed") { runCatAction("feed"); return; }
-    if (text === "/expressions") { showCatExpressions(); return; }
-    if (text.startsWith("/expression ")) {
-      const requested = text.slice(12).trim().toLowerCase();
-      const expression = CAT_EXPRESSIONS.find((item) => item.id === requested || item.label.toLowerCase() === requested);
-      if (!expression) {
-        setMessages((old) => [...old, { role: "assistant", content: "Unknown expression. Use /expressions to see the list." }]);
-      } else equipCatExpression(expression.id);
-      return;
-    }
     if (text === "/retry") {
       if (!lastUserPrompt) {
         setMessages((old) => [...old, { role: "assistant", content: "There is no previous user message to retry yet." }]);
@@ -1474,7 +1403,6 @@ const showTokenUsage = () => terminal().width >= 48;
           lastApproval = { kind: "file", id: result.proposal.id, status: "applied", automatic: true };
           setMessages((old) => old.map((m) => (m.meta?.id === result.proposal.id ? { ...m, meta: { ...m.meta, status: "applied automatically" } } : m)));
           setMessages((old) => [...old, { role: "assistant", content: `PROPOSAL AUTO-APPLIED — ${applyResult.output}` }]);
-          setCatMood("happy");
           setNotice("approved change applied automatically");
         } else {
           setMessages((old) => old.map((m) => (m.meta?.id === result.proposal.id ? { ...m, meta: { ...m.meta, status: "auto-apply failed · awaiting approval" } } : m)));
@@ -1497,8 +1425,8 @@ const showTokenUsage = () => terminal().width >= 48;
         setMessages((old) => old.map((m) => (m.meta?.id === proposalId ? { ...m, meta: { ...m.meta, status: "applied" } } : m)));
       }
       setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : `Change not applied: ${result.error}` }]);
-      if (result.ok) { pendingProposalId = undefined; lastApproval = { kind: "file", id: proposalId, status: "applied" }; setCatMood("happy"); }
-      else { setCatMood("error"); lastApproval = { kind: "file", id: proposalId, status: "failed" }; }
+      if (result.ok) { pendingProposalId = undefined; lastApproval = { kind: "file", id: proposalId, status: "applied" }; }
+      else { lastApproval = { kind: "file", id: proposalId, status: "failed" }; }
       setNotice(result.ok ? "approved change applied" : "approval failed");
       return;
     }
@@ -1527,8 +1455,8 @@ const showTokenUsage = () => terminal().width >= 48;
         setMessages((old) => old.map((m) => (m.meta?.id === proposalId ? { ...m, meta: { ...m.meta, status: "applied" } } : m)));
       }
       setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : `Change not applied: ${result.error}` }]);
-      if (result.ok) { pendingProposalId = undefined; lastApproval = { kind: "file", id: proposalId, status: "applied" }; setCatMood("happy"); }
-      else { setCatMood("error"); lastApproval = { kind: "file", id: proposalId, status: "failed" }; }
+      if (result.ok) { pendingProposalId = undefined; lastApproval = { kind: "file", id: proposalId, status: "applied" }; }
+      else { lastApproval = { kind: "file", id: proposalId, status: "failed" }; }
       setNotice(result.ok ? "approved change applied" : "approval failed");
       return;
     }
@@ -1657,7 +1585,6 @@ const showTokenUsage = () => terminal().width >= 48;
       setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : `Command failed: ${result.error}` }]);
       lastApproval = { kind: "command", id, status: result.ok ? "completed" : "failed" };
       setNotice(result.ok ? "command completed" : "command failed");
-      setCatMood(result.ok ? "zoomies" : "error");
       setBusy(false);
       return;
     }
@@ -1683,7 +1610,7 @@ const showTokenUsage = () => terminal().width >= 48;
     if (text === "/help") {
       setMessages((old) => [...old, {
         role: "assistant",
-        content: "Commands: /help · /cat · /pet · /feed · /expressions · /expression <id> · /models · /model · /connect · /session · /session new · /session delete <id> · /session rename · /workspace · /project · /capabilities · /limits · /autoapply [on|off|status|save] · /ls [path] · /read <path> · /search <text> · /propose <path> · /apply · /approve · /reject · /command <program args> · /run · /reject-command · /cancel · /clear · /quit\n\nShortcuts: Ctrl+Y = approve pending proposal/command\nFile changes require explicit /apply approval (or enable auto-apply with /autoapply on). Terminal commands are restricted, previewed, and run only after explicit /run approval. Web browsing remains unavailable.",
+        content: "Commands: /help · /models · /model · /connect · /session · /session new · /session delete <id> · /session rename · /workspace · /project · /capabilities · /limits · /autoapply [on|off|status|save] · /ls [path] · /read <path> · /search <text> · /propose <path> · /apply · /approve · /reject · /command <program args> · /run · /reject-command · /cancel · /clear · /quit\n\nShortcuts: Ctrl+Y = approve pending proposal/command\nFile changes require explicit /apply approval (or enable auto-apply with /autoapply on). Terminal commands are restricted, previewed, and run only after explicit /run approval. Web browsing remains unavailable.",
       }]);
       return;
     }
@@ -1733,7 +1660,8 @@ const showTokenUsage = () => terminal().width >= 48;
     setHistory(updatedHistory);
     setBusy(true);
     setModeLocked(true);
-    setCatMood("thinking");
+    catEvent({ type: "modelThinking" });
+    talkedThisTurn = false;
     activeController = new AbortController();
     setNotice(`thinking with ${model()}…`);
 
@@ -1759,6 +1687,10 @@ const showTokenUsage = () => terminal().width >= 48;
           if (event.type === "content") {
             answer += event.content;
             setStreamingContent(answer);
+            if (!talkedThisTurn) {
+              talkedThisTurn = true;
+              catEvent({ type: "responseStreaming" });
+            }
           } else if (event.type === "usage") {
             roundUsage = event.usage;
           } else {
@@ -1798,6 +1730,7 @@ const showTokenUsage = () => terminal().width >= 48;
           return next;
         });
         for (const call of requestedCalls) {
+          catEvent({ type: "toolStarted", toolName: call.function.name });
           setNotice(`running ${call.function.name}…`);
           // Tool call timeline line
           const args = formatToolArgs(call.function.arguments ?? "");
@@ -1816,6 +1749,7 @@ const showTokenUsage = () => terminal().width >= 48;
               mode(),
             );
           let toolOutput = result.ok ? result.output : `Tool failed: ${result.error}`;
+          catEvent(result.ok ? { type: "operationCompleted" } : { type: "operationFailed" });
           if (repeatedCallGuard.observe(call.function.name, call.function.arguments, toolOutput)) {
             toolOutput = "Repeated tool call detected: the arguments and result have remained identical for multiple attempts. Use the prior result or change the operation instead of looping.";
           }
@@ -1881,11 +1815,13 @@ const showTokenUsage = () => terminal().width >= 48;
         persist({ role: "assistant", content: answer });
       }
       setNotice("ready ♡");
-      setCatMood("happy");
+      catEvent({ type: "operationCompleted" });
     } catch (error) {
       cancelStreamingPreview();
       const aborted = activeController?.signal.aborted ?? false;
       const message = aborted ? "Request cancelled." : error instanceof Error ? error.message : "Unknown NVIDIA API error";
+      if (aborted) catEvent({ type: "sessionWaiting" });
+      else catEvent({ type: "operationFailed" });
       setMessages((old) => {
         const next = [...old];
         const last = next[next.length - 1];
@@ -1897,7 +1833,6 @@ const showTokenUsage = () => terminal().width >= 48;
         return next;
       });
       setNotice(aborted ? "cancelled" : "request failed");
-      setCatMood(aborted ? "curious" : "error");
     } finally {
       activeController = undefined;
       setBusy(false);
@@ -1908,6 +1843,7 @@ const showTokenUsage = () => terminal().width >= 48;
 
   try {
     const config = loadConfig();
+    catPrefs = config.cat;
     client = new NvidiaClient(config.apiKey, config.baseUrl);
     configuredModel = config.preferredModel;
     agentLimits = { maxToolRounds: config.maxToolRounds, maxToolCallsPerTurn: config.maxToolCallsPerTurn };
@@ -1918,14 +1854,21 @@ const showTokenUsage = () => terminal().width >= 48;
     setNotice(error instanceof Error ? error.message : "Configuration error");
   }
 
-  const catAnimationTimer = setInterval(() => {
-    if (catProfile().animationsEnabled) setCatFrame((frame) => (frame + 1) % 12);
-  }, 500);
-  onCleanup(() => clearInterval(catAnimationTimer));
+  const catPhaseTimer = setInterval(() => {
+    setCatPhase((phase) => phase + 100);
+    tickCat();
+  }, 100);
+  onCleanup(() => clearInterval(catPhaseTimer));
+
+  // Greet once at session start; the mapper settles back to idle.
+  onMount(() => {
+    catEvent({ type: "sessionStarted" });
+    setCatState(catMapper.activity.state);
+  });
 
   // Paste handler (terminal bracketed paste)
   usePaste((event) => {
-    if (catMenuOpen() || sessionPickerOpen() || connectOpen()) return;
+    if (sessionPickerOpen() || connectOpen()) return;
     pasteEventCounter++;
     const text = stripAnsiSequences(decodePasteBytes(event.bytes));
     const { text: sanitized, truncated } = sanitizePastedText(text);
@@ -1970,7 +1913,7 @@ const showTokenUsage = () => terminal().width >= 48;
     }
 
     // Global copy/paste shortcuts (work when not in popup)
-    if (!connectOpen() && !sessionPickerOpen() && !catMenuOpen() && !modelPickerOpen() && !renameOpen()) {
+    if (!connectOpen() && !sessionPickerOpen() && !modelPickerOpen() && !renameOpen()) {
       // Ctrl+Shift+V or Ctrl+V or Shift+Insert - paste from clipboard
       if ((key.ctrl && key.shift && key.name === "v") || (key.ctrl && key.name === "v") || (key.name === "insert" && key.shift)) {
         void readClipboardText().then((text) => {
@@ -2029,7 +1972,7 @@ const showTokenUsage = () => terminal().width >= 48;
       }
       // Ctrl+Y - apply pending file proposal (when idle)
       if (key.ctrl && !key.shift && key.name === "y") {
-        if (!busy() && !connectOpen() && !sessionPickerOpen() && !catMenuOpen() && !modelPickerOpen() && !renameOpen()) {
+        if (!busy() && !connectOpen() && !sessionPickerOpen() && !modelPickerOpen() && !renameOpen()) {
           void (async () => {
             if (pendingProposalId && workspaceTools) {
               const proposalId = pendingProposalId;
@@ -2039,11 +1982,9 @@ const showTokenUsage = () => terminal().width >= 48;
                 lastApproval = { kind: "file", id: proposalId, status: "applied" };
                 setMessages((old) => old.map((m) => (m.meta?.id === proposalId ? { ...m, meta: { ...m.meta, status: "applied" } } : m)));
                 setMessages((old) => [...old, { role: "assistant", content: result.output }]);
-                setCatMood("happy");
                 setNotice("approved change applied (Ctrl+Y)");
               } else {
                 setMessages((old) => [...old, { role: "assistant", content: `Change not applied: ${result.error}` }]);
-                setCatMood("error");
                 setNotice("approval failed");
               }
             } else if (pendingCommandId && terminalTools) {
@@ -2056,7 +1997,6 @@ const showTokenUsage = () => terminal().width >= 48;
               setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : `Command failed: ${result.error}` }]);
               lastApproval = { kind: "command", id, status: result.ok ? "completed" : "failed" };
               setNotice(result.ok ? "command completed" : "command failed");
-              setCatMood(result.ok ? "zoomies" : "error");
               setBusy(false);
             } else {
               showToast("No pending proposal or command to approve");
@@ -2105,30 +2045,6 @@ const showTokenUsage = () => terminal().width >= 48;
       }
       return;
     }
-    if (catMenuOpen()) {
-      if (catExpressionPicker()) {
-        if (key.name === "escape") { setCatExpressionPicker(false); return; }
-        if (key.name === "up") { setCatExpressionIndex((old) => (old - 1 + CAT_EXPRESSIONS.length) % CAT_EXPRESSIONS.length); return; }
-        if (key.name === "down") { setCatExpressionIndex((old) => (old + 1) % CAT_EXPRESSIONS.length); return; }
-        if (key.name === "return") { equipCatExpression(CAT_EXPRESSIONS[catExpressionIndex()]?.id ?? "idle"); return; }
-        return;
-      }
-      if (key.name === "escape") { setCatExpressionPicker(false); setCatMenuOpen(false); return; }
-      if (key.name === "up") { setCatMenuIndex((old) => (old - 1 + catMenuItems.length) % catMenuItems.length); return; }
-      if (key.name === "down") { setCatMenuIndex((old) => (old + 1) % catMenuItems.length); return; }
-      if (key.name === "return") {
-        const actionByIndex = ["pet", "feed", "expressions", "toggle-animations", "close"] as const;
-        runCatAction(actionByIndex[catMenuIndex()] ?? "close");
-        return;
-      }
-      if (key.sequence === "1") { runCatAction("pet"); return; }
-      if (key.sequence === "2") { runCatAction("feed"); return; }
-      if (key.sequence === "3") { runCatAction("expressions"); return; }
-      if (key.sequence === "4") { runCatAction("toggle-animations"); return; }
-      if (key.sequence === "5") { runCatAction("close"); return; }
-      return;
-    }
-    if (key.name === "f2") { setCatMenuOpen(true); setCatMenuIndex(0); return; }
     if (key.shift && key.name === "tab") { toggleMode(); return; }
     if (key.name === "up" && suggestions.length) {
       setCommandIndex((old) => (old - 1 + suggestions.length) % suggestions.length);
@@ -2192,7 +2108,6 @@ const showTokenUsage = () => terminal().width >= 48;
       // even if the terminal marks modifier flags on the event, while ignoring
       // single-character control shortcuts so Ctrl+Shift+C never enters input.
       const pasted = key.sequence.replace(/\r\n?/g, "\n");
-      setCatMood("curious");
       setInput(value.slice(0, pos) + pasted + value.slice(pos));
       setCursorPos(pos + pasted.length);
     }
@@ -2373,23 +2288,22 @@ const showTokenUsage = () => terminal().width >= 48;
       <box flexDirection="row" gap={1} flexGrow={1} minWidth={0} minHeight={0} width="100%" overflow="hidden">
         <Show when={sidebarVisible()}>
         <box flexDirection="column" backgroundColor={colors.panel} border={["right"]} borderColor={colors.rule} padding={1} width={sidebarMetrics().sidebarWidth} minWidth={scaledCells(28)} height="100%" minHeight={0} flexShrink={0} gap={0} overflow="hidden">
+          <CatCompanion
+            width={Math.max(24, sidebarMetrics().sidebarWidth - 2)}
+            height={Math.max(15, terminal().height - 16)}
+            phase={catPhase()}
+            state={catState()}
+            enabled={catPrefs?.enabled ?? true}
+            pack={catPrefs?.assetPack ?? "default"}
+            renderer={catPrefs?.renderer ?? "auto"}
+            animation={catPrefs?.animation ?? true}
+            scale={catPrefs?.scale ?? 1}
+            idleFps={catPrefs?.idleFps ?? 0}
+            workingFps={catPrefs?.workingFps ?? 0}
+            colors={{ divider: colors.catLine, ascii: { transparent: colors.bg, outline: colors.catLine, body: colors.lavender, light: colors.pink, eye: colors.peach } }}
+          />
           <scrollbox flexGrow={1} minHeight={0} width="100%" overflow="hidden" verticalScrollbarOptions={{ visible: false }}>
             <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0}>
-              <box flexDirection="column" gap={0} flexShrink={0} onMouseDown={() => { setCatMenuOpen((open) => !open); setCatMenuIndex(0); setCatExpressionPicker(false); }}>
-                <box borderStyle="single" borderColor={colors.rule} padding={1} alignSelf="center" overflow="hidden">
-                  <CatPortrait
-                    height={sidebarMetrics().catHeight}
-                    expression={catProfile().selectedExpression as CatExpressionId}
-                    mood={catMood()}
-                    frame={catFrame()}
-                    animated={catProfile().animationsEnabled}
-                  />
-                </box>
-                <text fg={colors.pink} textAlign="center">MINT THE CAT</text>
-                <text fg={colors.muted} textAlign="center">click or press F2 · /cat</text>
-              </box>
-              <text fg={colors.muted} width="100%" minWidth={0} flexShrink={0} wrapMode="none" truncate={true}>{catProfile().pets} pets · {catProfile().treats} treats</text>
-              <box border={["bottom"]} borderColor={colors.rule} width="100%" height={1} minHeight={1} />
               <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none">SESSIONS</text>
               <For each={allSessions()}>
                 {(s) => (
@@ -2441,7 +2355,7 @@ const showTokenUsage = () => terminal().width >= 48;
             <Show when={!sidebarVisible()}>
               <box flexDirection="row" gap={1} flexShrink={0}>
                 <text fg={colors.pink} wrapMode="none">^.^</text>
-                <text fg={colors.muted} wrapMode="none">{terminal().width >= 32 ? "F2 cat" : "F2"}</text>
+                <text fg={colors.muted} wrapMode="none">sidebar hidden</text>
               </box>
             </Show>
           </box>
@@ -2857,86 +2771,6 @@ const showTokenUsage = () => terminal().width >= 48;
         </ModalFrame>
       </Show>
 
-      {/* Cat menu modal */}
-      <Show when={catMenuOpen()}>
-        <ModalFrame
-          onClose={() => { setCatMenuOpen(false); setCatExpressionPicker(false); }}
-          title="FELIS TERMINALIS"
-          width={terminal().width >= 80 ? 76 : 56}
-          minWidth={36}
-          borderColor={colors.rule}
-        >
-        <box flexDirection={terminal().width >= 80 ? "row" : "column"} gap={2} width="100%" minWidth={0} alignItems={terminal().width >= 80 ? "flex-start" : "center"}>
-          <box borderStyle="single" borderColor={colors.rule} padding={0} overflow="hidden">
-            <CatPortrait
-              height={terminal().width >= 80 ? Math.min(24, terminal().height - 8) : 18}
-              expression={catProfile().selectedExpression as CatExpressionId}
-              mood={catMood()}
-              frame={catFrame()}
-              animated={catProfile().animationsEnabled}
-            />
-          </box>
-          <box flexDirection="column" gap={1} width="100%" minWidth={0} flexGrow={1}>
-            <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true} textAlign={terminal().width >= 80 ? "left" : "center"}>{catProfile().pets} pets · {catProfile().treats} treats</text>
-            <Show when={catExpressionPicker()}>
-              <text fg={colors.pink}>--- EXPRESSIONS ---</text>
-              <For each={CAT_EXPRESSIONS}>{(expression, index) =>
-                <box
-                  flexDirection="row"
-                  width="100%"
-                  minWidth={0}
-                  height={1}
-                  minHeight={1}
-                  overflow="hidden"
-                  backgroundColor={index() === catExpressionIndex() ? colors.lavender : colors.panel}
-                  onMouseMove={() => { setCatExpressionIndex(index()); }}
-                  onMouseUp={(e) => { e.stopPropagation(); if (catProfile().unlockedExpressions.includes(expression.id)) equipCatExpression(expression.id); }}
-                >
-                  <text
-                    fg={index() === catExpressionIndex() ? colors.bg : catProfile().unlockedExpressions.includes(expression.id) ? colors.text : colors.muted}
-                    wrapMode="none"
-                    width="100%"
-                    minWidth={0}
-                    truncate={true}
-                  >
-                    {(index() === catExpressionIndex() ? "❯ " : "  ") + (catProfile().unlockedExpressions.includes(expression.id) ? "◆ " : "× ") + expression.label}
-                  </text>
-                </box>
-              }</For>
-              <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>↑/↓ choose · Enter · Esc · Click to equip</text>
-            </Show>
-            <Show when={!catExpressionPicker()}>
-              <text fg={colors.pink}>--- CAT MENU ---</text>
-              <For each={catMenuItems}>{(item, index) =>
-                <box
-                  flexDirection="row"
-                  width="100%"
-                  minWidth={0}
-                  height={1}
-                  minHeight={1}
-                  overflow="hidden"
-                  backgroundColor={index() === catMenuIndex() ? colors.lavender : colors.panel}
-                  onMouseMove={() => { setCatMenuIndex(index()); }}
-                  onMouseUp={(e) => { e.stopPropagation(); const actionByIndex = ["pet", "feed", "expressions", "toggle-animations", "close"] as const; runCatAction(actionByIndex[index()] ?? "close"); }}
-                >
-                  <text
-                    fg={index() === catMenuIndex() ? colors.bg : colors.text}
-                    wrapMode="none"
-                    width="100%"
-                    minWidth={0}
-                    truncate={true}
-                  >
-                    {(index() === catMenuIndex() ? "❯ " : "  ") + item.shortcut + "  " + item.label}
-                  </text>
-                </box>
-              }</For>
-              <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>{"· " + (catMenuItems[catMenuIndex()]?.detail ?? "")}</text>
-              <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>↑/↓ + Enter · Esc close · Click to run</text>
-            </Show>
-          </box>
-        </box>
-      </ModalFrame>
-    </Show>
     </box>
   );
 }

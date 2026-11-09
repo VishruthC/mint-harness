@@ -1,0 +1,100 @@
+{
+  "name": "MINT Cat (Default)",
+  "version": 1,
+  "dimensions": {
+    "width": 128,
+    "height": 128
+  },
+  "animations": {
+    "idle": {
+      "frames": [
+        "idle/frame-01.png",
+        "idle/frame-02.png"
+      ],
+      "fps": 2,
+      "loop": true,
+      "holdMs": 0
+    },
+    "think": {
+      "frames": [
+        "think/frame-01.png",
+        "think/frame-02.png"
+      ],
+      "fps": 1.5,
+      "loop": true,
+      "holdMs": 0
+    },
+    "talk": {
+      "frames": [
+        "talk/frame-01.png",
+        "talk/frame-02.png",
+        "talk/frame-03.png",
+        "talk/frame-04.png"
+      ],
+      "fps": 4,
+      "loop": true,
+      "holdMs": 0
+    },
+    "read": {
+      "frames": [
+        "read/frame-01.png",
+        "read/frame-02.png"
+      ],
+      "fps": 3,
+      "loop": true,
+      "holdMs": 0
+    },
+    "write": {
+      "frames": [
+        "write/frame-01.png",
+        "write/frame-02.png"
+      ],
+      "fps": 3,
+      "loop": true,
+      "holdMs": 0
+    },
+    "tool": {
+      "frames": [
+        "tool/frame-01.png",
+        "tool/frame-02.png"
+      ],
+      "fps": 3,
+      "loop": true,
+      "holdMs": 0
+    },
+    "success": {
+      "frames": [
+        "success/frame-01.png",
+        "success/frame-02.png"
+      ],
+      "fps": 2,
+      "loop": false,
+      "holdMs": 2200
+    },
+    "failure": {
+      "frames": [
+        "failure/frame-01.png",
+        "failure/frame-02.png"
+      ],
+      "fps": 2,
+      "loop": false,
+      "holdMs": 2600
+    },
+    "hi": {
+      "frames": [
+        "hi/frame-01.png",
+        "hi/frame-02.png"
+      ],
+      "fps": 2,
+      "loop": false,
+      "holdMs": 2000
+    }
+  },
+  "palette": {
+    ".": "#1e1e2e",
+    "o": "#777184",
+    "#": "#cba6f7",
+    "l": "#f5c2e7",
+    "e": "#fab387"
+  }
+}

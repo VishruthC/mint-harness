@@ -2,7 +2,7 @@
 
 A cute, terminal-native coding harness inspired by OpenCode's architecture, independently implemented and **NVIDIA API-only**.
 
-> Current milestone: Interactive MINT harness — OpenTUI chat, NVIDIA NIM streaming, SQLite sessions, model-callable workspace tools, targeted patch proposals, project-context discovery, approval-gated restricted terminal commands, repeated-tool-loop safeguards, and a persistent pixel-cat companion. Web browsing is not implemented.
+> Current milestone: Interactive MINT harness — OpenTUI chat, NVIDIA NIM streaming, SQLite sessions, model-callable workspace tools, targeted patch proposals, project-context discovery, approval-gated restricted terminal commands, repeated-tool-loop safeguards, and a minimalist line-art cat mascot. Web browsing is not implemented.
 
 ## Requirements
 
@@ -76,7 +76,6 @@ MINT now supports full mouse interaction across all menus:
 - **All popups** (`/connect`, `/model`, `/models`, `/session`, `/session rename`): Click outside to close, click buttons to act, click list rows to select
 - **Model picker**: Click a model to select and persist it; wheel scrolls the list; Refresh/Clear/Close buttons
 - **Session picker**: Click a session to resume; wheel scrolls; New Session/Close buttons
-- **Cat menu** (modal): Click cat card, press `F2`, or type `/cat` to open; click menu items to run actions; click expressions to equip
 - **Command palette** (`/`): Hover highlights; click to execute or prefill; wheel moves selection
 - **Sidebar**: Click session name to rename, model name to open picker, status to open `/connect`
 - **Toast notifications**: Click to dismiss
@@ -219,21 +218,10 @@ bun run check:windows
 The PowerShell check script runs TypeScript type-checking first and stops if it fails, then runs the Bun test suite.
 
 
-## Interactive cat companion
+## Line-art cat mascot
 
-MINT features a fully animated, anti-aliased cat portrait rendered as a real image — not ASCII art. The portrait is drawn in code at 384×384 with 2× supersampling for crisp edges, then displayed through OpenTUI's `ImageRenderable` using the best available terminal graphics protocol:
+At the top of the left sidebar, MINT shows a small PNG cat sitting on a divider: real 128×128 PNG frames from `src/cat/assets/default/`, rendered through OpenTUI's image protocols (Kitty/Sixel/blocks) with a pixel-art fallback. Frames are selected by the app's real activity (greeting on start, thinking while reasoning, talking while streaming, reading/writing/tools, success/failure reactions) via `manifest.json`. The muted lavender palette reuses the existing theme tokens (`#777184` outline, `#cba6f7` body, `#f5c2e7` highlight, `#fab387` eyes, `#1E1E2E` background).
 
-- **Kitty graphics** — full-color RGBA with alpha, when the terminal supports it (Kitty, WezTerm, Ghostty, etc.)
-- **Sixel** — full-color image on Sixel-capable terminals
-- **Unicode quadrant blocks** — truecolor sub-pixel fallback everywhere else (works in any modern terminal)
+The sidebar's `SESSIONS` section sits below the companion. The input area is borderless, with a single hairline above the prompt and a metadata line below it: `Plan · <model> · <effort>` (mode, prettified model name, and effort level). Directly below it, a compact footer line shows the workspace path and git branch, with the current session's cumulative token usage on the right. Token counts come from the provider's streamed usage report and are stored per session, so they survive restarts and resume.
 
-The same character appears in the workspace sidebar and the `/cat` modal. Six expressions (idle, happy, love, zoomies, wizard, chaos) plus mood overlays (thinking, error, sleepy, curious) change the cat's face, posture, and effects. Idle animations include blinking, tail sway, breathing, ear twitches, floating hearts, sparkles, and Z's — all toggleable.
-
-The sidebar portrait scales with terminal size (24×12 → 32×16 → 40×20 cells) inside a specimen frame. The input area is borderless, with a single hairline above the prompt and a metadata line below it: `Plan · <model> · <effort>` (mode, prettified model name, and effort level). Directly below it, a compact footer line shows the workspace path and git branch, with the current session's cumulative token usage on the right. Token counts come from the provider's streamed usage report and are stored per session, so they survive restarts and resume.
-
-- `/pet` — pet MINT and increment the persistent pet counter.
-- `/feed` — give MINT a virtual treat.
-- `/expressions` — list expressions and unlock requirements.
-- `/expression <id>` — equip an unlocked expression (`idle`, `happy`, `love`, `zoomies`, `wizard`, or `chaos`).
-
-**Effort level** — set `MINT_EFFORT` in `.env` (`low`, `medium`, `high`, `max`; default `max`). This is displayed in the input box metadata line and passed as a hint to the model where supported. No external image assets or API keys are required for the cat; the portrait is generated entirely in memory.
+**Effort level** — set `MINT_EFFORT` in `.env` (`low`, `medium`, `high`, `max`; default `max`). This is displayed in the input box metadata line and passed as a hint to the model where supported.

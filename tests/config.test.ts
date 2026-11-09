@@ -69,6 +69,7 @@ describe("writeDotEnv", () => {
       maxToolCallsPerTurn: 20,
       effort: "max",
       autoApply: "manual",
+      cat: { enabled: true, assetPack: "default", renderer: "auto", animation: true, scale: 1, idleFps: 0, workingFps: 0 },
     };
     writeDotEnv(config, envPath);
     const content = readFileSync(envPath, "utf8");
@@ -92,6 +93,7 @@ describe("writeDotEnv", () => {
       maxToolCallsPerTurn: 24,
       effort: "max",
       autoApply: "manual",
+      cat: { enabled: true, assetPack: "default", renderer: "auto", animation: true, scale: 1, idleFps: 0, workingFps: 0 },
     };
     writeDotEnv(config, envPath);
     const content = readFileSync(envPath, "utf8");
@@ -112,6 +114,7 @@ describe("writeDotEnv", () => {
       maxToolCallsPerTurn: 24,
       effort: "max",
       autoApply: "manual",
+      cat: { enabled: true, assetPack: "default", renderer: "auto", animation: true, scale: 1, idleFps: 0, workingFps: 0 },
     };
     writeDotEnv(config, envPath);
     const content = readFileSync(envPath, "utf8");

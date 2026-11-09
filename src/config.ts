@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, renameSync, copyFileSync, unlinkSync, chmodSync } from "node:fs";
 import { z } from "zod";
 import { DEFAULT_AGENT_LOOP_LIMITS } from "./agent-loop";
+import type { CatConfig } from "./cat/types";
 
 const EnvSchema = z.object({
   NVIDIA_API_KEY: z.string().trim().min(1, "NVIDIA_API_KEY is missing"),
@@ -10,6 +11,13 @@ const EnvSchema = z.object({
   MINT_MAX_TOOL_CALLS_PER_TURN: z.coerce.number().int().positive().default(DEFAULT_AGENT_LOOP_LIMITS.maxToolCallsPerTurn),
   MINT_EFFORT: z.enum(["low", "medium", "high", "max"]).optional().default("max"),
   MINT_AUTO_APPLY: z.enum(["manual", "auto"]).default("manual"),
+  MINT_CAT_ENABLED: z.enum(["1", "0", "true", "false"]).default("1"),
+  MINT_CAT_ASSET_PACK: z.string().trim().min(1).default("default"),
+  MINT_CAT_RENDERER: z.enum(["auto", "kitty", "sixel", "blocks", "ascii"]).default("auto"),
+  MINT_CAT_ANIMATION: z.enum(["1", "0", "true", "false"]).default("1"),
+  MINT_CAT_SCALE: z.coerce.number().positive().max(3).default(1),
+  MINT_CAT_IDLE_FPS: z.coerce.number().nonnegative().max(30).default(0),
+  MINT_CAT_WORKING_FPS: z.coerce.number().nonnegative().max(30).default(0),
 });
 
 export type MintConfig = {
@@ -20,6 +28,13 @@ export type MintConfig = {
   maxToolCallsPerTurn: number;
   effort: "low" | "medium" | "high" | "max";
   autoApply: "manual" | "auto";
+  cat: CatConfig;
+};
+
+const truthy = (value: unknown) => {
+  if (value === true || value === 1) return true;
+  if (typeof value === "string") return ["1", "true"].includes(value.trim().toLowerCase());
+  return false;
 };
 
 function readDotEnv(path = ".env"): Record<string, string> {
@@ -58,6 +73,13 @@ export function loadConfig(env?: Record<string, string | undefined>): MintConfig
     MINT_MAX_TOOL_CALLS_PER_TURN: source.MINT_MAX_TOOL_CALLS_PER_TURN ?? String(DEFAULT_AGENT_LOOP_LIMITS.maxToolCallsPerTurn),
     MINT_EFFORT: source.MINT_EFFORT ?? "max",
     MINT_AUTO_APPLY: source.MINT_AUTO_APPLY ?? "manual",
+    MINT_CAT_ENABLED: source.MINT_CAT_ENABLED ?? "1",
+    MINT_CAT_ASSET_PACK: source.MINT_CAT_ASSET_PACK ?? "default",
+    MINT_CAT_RENDERER: source.MINT_CAT_RENDERER ?? "auto",
+    MINT_CAT_ANIMATION: source.MINT_CAT_ANIMATION ?? "1",
+    MINT_CAT_SCALE: source.MINT_CAT_SCALE ?? "1",
+    MINT_CAT_IDLE_FPS: source.MINT_CAT_IDLE_FPS ?? "0",
+    MINT_CAT_WORKING_FPS: source.MINT_CAT_WORKING_FPS ?? "0",
   });
 
   if (!parsed.success) {
@@ -72,6 +94,15 @@ export function loadConfig(env?: Record<string, string | undefined>): MintConfig
     maxToolCallsPerTurn: parsed.data.MINT_MAX_TOOL_CALLS_PER_TURN,
     effort: parsed.data.MINT_EFFORT,
     autoApply: parsed.data.MINT_AUTO_APPLY,
+    cat: {
+      enabled: truthy(parsed.data.MINT_CAT_ENABLED),
+      assetPack: parsed.data.MINT_CAT_ASSET_PACK,
+      renderer: parsed.data.MINT_CAT_RENDERER,
+      animation: truthy(parsed.data.MINT_CAT_ANIMATION),
+      scale: parsed.data.MINT_CAT_SCALE,
+      idleFps: parsed.data.MINT_CAT_IDLE_FPS,
+      workingFps: parsed.data.MINT_CAT_WORKING_FPS,
+    },
   };
 }
 
@@ -83,6 +114,13 @@ const MINT_KEYS = [
   "MINT_MAX_TOOL_CALLS_PER_TURN",
   "MINT_EFFORT",
   "MINT_AUTO_APPLY",
+  "MINT_CAT_ENABLED",
+  "MINT_CAT_ASSET_PACK",
+  "MINT_CAT_RENDERER",
+  "MINT_CAT_ANIMATION",
+  "MINT_CAT_SCALE",
+  "MINT_CAT_IDLE_FPS",
+  "MINT_CAT_WORKING_FPS",
 ] as const;
 
 function writeDotEnvAtomic(
@@ -126,6 +164,13 @@ export function writeDotEnv(config: MintConfig, path = ".env"): void {
       `MINT_MAX_TOOL_CALLS_PER_TURN=${config.maxToolCallsPerTurn}`,
       `MINT_EFFORT=${config.effort}`,
       `MINT_AUTO_APPLY=${config.autoApply}`,
+      `MINT_CAT_ENABLED=${config.cat.enabled ? "1" : "0"}`,
+      `MINT_CAT_ASSET_PACK="${config.cat.assetPack.replace(/"/g, '\\"')}"`,
+      `MINT_CAT_RENDERER=${config.cat.renderer}`,
+      `MINT_CAT_ANIMATION=${config.cat.animation ? "1" : "0"}`,
+      `MINT_CAT_SCALE=${config.cat.scale}`,
+      `MINT_CAT_IDLE_FPS=${config.cat.idleFps}`,
+      `MINT_CAT_WORKING_FPS=${config.cat.workingFps}`,
     ].filter(Boolean);
 
     return [...otherLines, ...newLines];
