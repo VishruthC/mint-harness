@@ -40,11 +40,16 @@
   --terminal-peach: #fab387;
   --terminal-red: #f38ba8;
   --terminal-cream: #ffebcd;
-  --terminal-rule: rgba(205, 214, 244, 0.14);
+  --terminal-rule: #3c3c50;
+  --terminal-add-bg: #21362a;
+  --terminal-remove-bg: #3a2430;
+  --terminal-raw-bg: #313244;
+  --terminal-yellow: #f9e2af;
 
   /* Type */
   --font-serif: "Newsreader Variable", Newsreader, Georgia, "Times New Roman", serif;
   --font-mono: "Victor Mono", ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --font-terminal: ui-monospace, "Cascadia Mono", "Consolas", "Menlo", "Monaco", "Liberation Mono", monospace;
   --font-pixel: "Departure Mono", "Victor Mono", monospace;
 
   /* Layout */

@@ -256,7 +256,9 @@ html.has-dialog {
   .tui-caret,
   .search-caret,
   .loop-node--gate.is-waiting rect,
-  .cat-heart {
+  .cat-heart,
+  .cat-canvas,
+  .cat-canvas-wrap::after {
     animation: none !important;
   }
 

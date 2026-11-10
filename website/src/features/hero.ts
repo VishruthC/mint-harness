@@ -1,4 +1,5 @@
-import { CatView } from "../lib/cat-view";
+import hiFrame01 from "../../../src/cat/assets/default/hi/frame-01.png";
+import hiFrame02 from "../../../src/cat/assets/default/hi/frame-02.png";
 import { $, $$, reducedMotion } from "../lib/dom";
 
 const sleep = (ms: number): Promise<void> =>
@@ -16,32 +17,54 @@ export function initHero(): void {
     (a, b) => Number(a.dataset.line ?? 0) - Number(b.dataset.line ?? 0),
   );
   const input = $<HTMLElement>("[data-tui-input]", tui);
-  const catCanvas = $<HTMLCanvasElement>("[data-hero-cat]");
+  const userText = lines[0]?.querySelector<HTMLElement>(".tui-user-text") ?? lines[0] ?? null;
+  const clock = $<HTMLTimeElement>("[data-tui-clock]", tui);
+  const cat = $<HTMLImageElement>("[data-hero-cat]");
 
-  let cat: CatView | null = null;
-  if (catCanvas) {
-    try {
-      cat = new CatView({
-        canvas: catCanvas,
-        size: 128,
-        expression: "idle",
-        mood: "idle",
-        animated: true,
-      });
-    } catch {
-      cat = null;
+  const tickClock = (): void => {
+    if (!clock) return;
+    const now = new Date();
+    const pad = (value: number): string => String(value).padStart(2, "0");
+    clock.textContent = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    clock.dateTime = now.toISOString();
+  };
+  tickClock();
+  window.setInterval(tickClock, 1000);
+
+  if (cat) {
+    const frames = [hiFrame01, hiFrame02];
+    const preload = new Image();
+    preload.src = frames[1];
+    cat.src = frames[0];
+
+    if (!reducedMotion()) {
+      let frame = 0;
+      window.setInterval(() => {
+        frame = (frame + 1) % frames.length;
+        cat.src = frames[frame];
+      }, 500);
     }
   }
 
   let runId = 0;
+  let slide: Animation | null = null;
 
   const showLines = (count: number): void => {
     lines.slice(0, count).forEach((line) => line.classList.add("is-visible"));
   };
 
+  const reveal = (index: number): void => {
+    const line = lines[index];
+    if (!line) return;
+    line.classList.add("is-visible");
+  };
+
   const play = async (): Promise<void> => {
     const token = ++runId;
     const alive = (): boolean => token === runId;
+
+    slide?.cancel();
+    slide = null;
 
     if (replay) {
       replay.disabled = true;
@@ -49,8 +72,11 @@ export function initHero(): void {
     }
 
     lines.forEach((line) => line.classList.remove("is-visible"));
-    if (input) input.textContent = "";
-    cat?.setMood("idle");
+    if (input) {
+      input.classList.remove("is-visible");
+      input.classList.remove("is-sliding");
+      input.textContent = "";
+    }
 
     if (reducedMotion()) {
       showLines(lines.length);
@@ -65,10 +91,9 @@ export function initHero(): void {
     if (!alive()) return;
 
     const question =
-      lines[0]?.querySelectorAll("span")[1]?.textContent?.trim() ??
-      "where is the session token validated?";
+      userText?.textContent?.trim() ?? "where is the session token validated?";
 
-    if (input) {
+    if (input && userText) {
       input.classList.add("is-visible");
       input.textContent = "";
 
@@ -81,13 +106,16 @@ export function initHero(): void {
       if (!alive()) return;
 
       const startRect = input.getBoundingClientRect();
-      const endRect = lines[0].getBoundingClientRect();
+      const endRect = userText.getBoundingClientRect();
+      const deltaX = endRect.left - startRect.left;
       const deltaY = endRect.top - startRect.top;
 
-      const slide = input.animate(
+      input.classList.add("is-sliding");
+
+      slide = input.animate(
         [
-          { transform: "translateY(0px)", opacity: 1 },
-          { transform: `translateY(${deltaY}px)`, opacity: 1 },
+          { transform: "translate(0px, 0px)", opacity: 1 },
+          { transform: `translate(${deltaX}px, ${deltaY}px)`, opacity: 1 },
         ],
         {
           duration: 360,
@@ -97,54 +125,35 @@ export function initHero(): void {
       );
 
       await new Promise<void>((resolve) => {
+        if (!slide) {
+          resolve();
+          return;
+        }
         slide.onfinish = () => resolve();
         slide.oncancel = () => resolve();
       });
 
       if (!alive()) return;
 
-      slide.cancel();
+      slide?.cancel();
+      slide = null;
       input.classList.remove("is-visible");
+      input.classList.remove("is-sliding");
       input.textContent = "";
-      lines[0].classList.add("is-visible");
-    } else {
-      showLines(1);
     }
 
-    await sleep(420);
-    if (!alive()) return;
-    showLines(2);
-    cat?.setMood("thinking");
+    reveal(0);
 
-    await sleep(300);
-    if (!alive()) return;
-    showLines(3);
+    const delays = [420, 300, 320, 400, 280, 280, 400];
 
-    await sleep(320);
-    if (!alive()) return;
-    showLines(4);
-
-    await sleep(400);
-    if (!alive()) return;
-    showLines(5);
-    cat?.setMood("curious");
-
-    await sleep(280);
-    if (!alive()) return;
-    showLines(6);
-
-    await sleep(280);
-    if (!alive()) return;
-    showLines(7);
-    cat?.setMood("happy");
-
-    await sleep(400);
-    if (!alive()) return;
-    showLines(8);
+    for (let index = 1; index < lines.length; index += 1) {
+      await sleep(delays[index - 1] ?? 300);
+      if (!alive()) return;
+      reveal(index);
+    }
 
     await sleep(550);
     if (!alive()) return;
-    cat?.setMood("idle");
 
     if (replay) {
       replay.disabled = false;

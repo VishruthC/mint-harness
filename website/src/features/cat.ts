@@ -1,5 +1,4 @@
-import type { CatExpression, CatMood } from "@mint/cat-art";
-import { CatView } from "../lib/cat-view";
+import { CatPlayer, type CatExpression } from "../lib/cat-player";
 import { $, reducedMotion, setText } from "../lib/dom";
 import { showToast } from "../lib/toast";
 
@@ -123,34 +122,19 @@ function unlockedFor(pets: number, treats: number): CatExpression[] {
   ).map((expression) => expression.id);
 }
 
-function expressionMood(expression: CatExpression): CatMood {
-  switch (expression) {
-    case "happy":
-      return "happy";
-    case "love":
-      return "love";
-    case "zoomies":
-      return "zoomies";
-    case "wizard":
-      return "curious";
-    case "chaos":
-      return "zoomies";
-    default:
-      return "idle";
-  }
-}
-
 function expressionInfo(id: CatExpression): ExpressionInfo {
   return EXPRESSIONS.find((expression) => expression.id === id) ?? EXPRESSIONS[0]!;
 }
 
 export function initCatPlayground(): void {
-  const canvas = $<HTMLCanvasElement>("[data-cat-stage]");
+  const image = $<HTMLImageElement>("[data-cat-stage]");
   const list = $<HTMLElement>("[data-expression-list]");
-  if (!canvas || !list) return;
+  const canvasWrap = image?.closest<HTMLElement>(".cat-canvas-wrap") ?? null;
+  if (!image || !list || !canvasWrap) return;
 
   const state = loadState();
   const frameLabel = $<HTMLElement>("[data-cat-frame]");
+  const frameTotal = $<HTMLElement>("[data-cat-frame-total]");
   const petCount = $<HTMLElement>("[data-pet-count]");
   const feedCount = $<HTMLElement>("[data-feed-count]");
   const animateToggle = $<HTMLInputElement>("[data-cat-animate]");
@@ -160,17 +144,19 @@ export function initCatPlayground(): void {
   const feedButton = $<HTMLButtonElement>("[data-feed]");
   const unlockAll = $<HTMLButtonElement>("[data-unlock-all]");
   const resetButton = $<HTMLButtonElement>("[data-reset-cat]");
-  const canvasWrap = canvas.closest<HTMLElement>(".cat-canvas-wrap");
 
   let toastTimer = 0;
   let moodTimer = 0;
 
-  const view = new CatView({
-    canvas,
+  const view = new CatPlayer({
+    image,
+    stage: canvasWrap,
     expression: state.selected,
-    mood: expressionMood(state.selected),
-    animated: state.animated,
-    onFrame: (frame) => setText(frameLabel, String(frame).padStart(2, "0")),
+    animated: state.animated && !reducedMotion(),
+    onFrame: (frame, total) => {
+      setText(frameLabel, String(frame).padStart(2, "0"));
+      setText(frameTotal, String(total).padStart(2, "0"));
+    },
   });
 
   const pills = new Map<CatExpression, HTMLButtonElement>();
@@ -187,7 +173,7 @@ export function initCatPlayground(): void {
   const scheduleMoodReset = (): void => {
     window.clearTimeout(moodTimer);
     moodTimer = window.setTimeout(() => {
-      view.setMood(expressionMood(state.selected));
+      view.play(state.selected);
     }, 2200);
   };
 
@@ -240,10 +226,7 @@ export function initCatPlayground(): void {
     );
 
     const selectedInfo = expressionInfo(state.selected);
-    canvas.setAttribute(
-      "aria-label",
-      `MINT the cat, ${selectedInfo.label} expression, rendered from the harness cat renderer.`,
-    );
+    image.alt = `MINT the cat, ${selectedInfo.label} expression, from the harness asset pack.`;
   };
 
   const chooseExpression = (info: ExpressionInfo): void => {
@@ -257,8 +240,7 @@ export function initCatPlayground(): void {
     window.clearTimeout(moodTimer);
     state.selected = info.id;
     saveState(state);
-    view.setExpression(info.id);
-    view.setMood(expressionMood(info.id));
+    view.play(info.id);
     refresh();
     showCatMessage(`Expression: ${info.label}.`);
   };
@@ -321,7 +303,7 @@ export function initCatPlayground(): void {
     const unlocked = applyUnlocks();
     const message = PET_MESSAGES[(state.pets - 1) % PET_MESSAGES.length]!;
 
-    view.setMood(state.pets % 4 === 0 ? "love" : "happy");
+    view.play(state.pets % 4 === 0 ? "love" : "happy");
     saveState(state);
     refresh();
     spawnHearts();
@@ -335,7 +317,7 @@ export function initCatPlayground(): void {
     const unlocked = applyUnlocks();
     const message = TREAT_MESSAGES[(state.treats - 1) % TREAT_MESSAGES.length]!;
 
-    view.setMood(state.treats % 3 === 0 ? "zoomies" : "happy");
+    view.play(state.treats % 3 === 0 ? "zoomies" : "happy");
     saveState(state);
     refresh();
     scheduleMoodReset();
@@ -377,8 +359,7 @@ export function initCatPlayground(): void {
     }
 
     window.clearTimeout(moodTimer);
-    view.setExpression(state.selected);
-    view.setMood(expressionMood(state.selected));
+    view.play(state.selected);
     view.setAnimated(state.animated);
     refresh();
     showCatMessage("Cat reset. It has forgotten you already.");

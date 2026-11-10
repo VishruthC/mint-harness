@@ -166,75 +166,140 @@
           <figure class="hero-specimen" data-hero-specimen data-reveal>
             <div class="tui" data-tui>
               <div class="tui-top">
-                <div class="tui-brand"><span aria-hidden="true">✿</span> MINT</div>
-                <div class="tui-sub">tiny coding companion</div>
-                <div class="tui-session">✧ auth patch ✧</div>
-                <div class="tui-status"><span class="status-dot"></span> connected</div>
+                <div class="tui-header-left">
+                  <span class="tui-brand"
+                    ><span class="tui-flower" aria-hidden="true">✿</span>
+                    <span class="tui-brand-name">mint</span></span
+                  >
+                  <span class="tui-sub" aria-hidden="true">/ tiny coding companion</span>
+                </div>
+                <div class="tui-header-right">
+                  <span class="tui-session">auth patch review</span>
+                  <span class="tui-sep" aria-hidden="true">│</span>
+                  <span class="tui-status"
+                    ><span class="tui-status-glyph" aria-hidden="true">●</span> connected</span
+                  >
+                  <span class="tui-sep" aria-hidden="true">│</span>
+                  <time class="tui-clock" data-tui-clock>00:00</time>
+                </div>
               </div>
 
               <div class="tui-body">
                 <aside class="tui-sidebar">
                   <div class="tui-cat-wrap">
-                    <canvas
+                    <img
                       class="tui-cat"
                       data-hero-cat
                       width="128"
                       height="128"
-                      role="img"
-                      aria-label="MINT the pixel cat, rendered live"
-                    ></canvas>
+                      alt="MINT the cat, waving hello"
+                    />
                   </div>
-                  <p class="tui-cat-title">MINT THE CAT</p>
-                  <p class="tui-cat-meta">12 pets · 7 treats</p>
-                  <div class="tui-rule" aria-hidden="true"></div>
-                  <p class="tui-label">SESSION</p>
-                  <p class="tui-value">auth patch review</p>
-                  <p class="tui-label">MODEL</p>
-                  <p class="tui-value tui-model">meta/llama-3.1-70b-instruct</p>
-                  <p class="tui-label">STATUS</p>
-                  <p class="tui-value tui-ok"><span class="status-dot"></span> connected</p>
+                  <p class="tui-label">SESSIONS</p>
+                  <div class="tui-session-list" aria-hidden="true">
+                    <div class="tui-session-row is-active">
+                      <span class="tui-session-title">❯ auth patch review</span>
+                      <span class="tui-session-meta">Llama 3.1 70B · just now</span>
+                    </div>
+                    <div class="tui-session-row">
+                      <span class="tui-session-title">  typecheck loop</span>
+                      <span class="tui-session-meta">Llama 3.1 70B · 2h ago</span>
+                    </div>
+                    <div class="tui-session-row">
+                      <span class="tui-session-title">  cat unlock audit</span>
+                      <span class="tui-session-meta">Nemotron 4 340B · 3h ago</span>
+                    </div>
+                  </div>
                 </aside>
 
                 <div class="tui-chat">
                   <div class="tui-chat-head">
                     <span>✧ chat ✧</span>
-                    <span class="tui-hint">F2 cat</span>
                   </div>
 
                   <div class="tui-messages" data-tui-messages>
                     <div class="tui-line tui-line--user" data-line="0">
                       <span class="tui-role">you ❯</span>
-                      <span>where is the session token validated?</span>
+                      <span class="tui-user-text">where is the session token validated?</span>
                     </div>
                     <div class="tui-line tui-line--tool" data-line="1">
-                      <span class="tui-tool">·</span> workspace_search
+                      <span class="tui-tool">·</span>
+                      <span class="tui-tool-name">workspace_search</span>
                       <span class="tui-string">"session token"</span>
                     </div>
                     <div class="tui-line tui-line--result" data-line="2">
-                      <span class="tui-tool">↳</span> src/auth/session.ts:42
+                      <span class="tui-tool">↳</span>
+                      <span>src/auth/session.ts:42</span>
                     </div>
                     <div class="tui-line tui-line--tool" data-line="3">
-                      <span class="tui-tool">·</span> workspace_read
+                      <span class="tui-tool">·</span>
+                      <span class="tui-tool-name">workspace_read</span>
                       <span class="tui-string">src/auth/session.ts</span>
                     </div>
-                    <div class="tui-line tui-line--proposal" data-line="4">
-                      <span class="tui-spark">✦</span> proposal · 1 patch
+
+                    <div class="tui-line tui-line--proposal-card" data-line="4">
+                      <div class="tui-proposal">
+                        <div class="tui-proposal-head">
+                          <span>workspace_propose_patch</span>
+                          <span class="tui-proposal-status">awaiting approval</span>
+                        </div>
+                        <div class="tui-proposal-file">
+                          <span class="tui-proposal-path">src/auth/session.ts</span>
+                          <span class="tui-add">+1</span>
+                          <span class="tui-del">−1</span>
+                        </div>
+                        <div class="tui-proposal-body">
+                          <div class="tui-diff-row">
+                            <span class="tui-diff-ln">40</span>
+                            <span class="tui-diff-sign"> </span>
+                            <span class="tui-diff-text">const row = await db.get(token);</span>
+                          </div>
+                          <div class="tui-diff-row tui-diff-row--remove">
+                            <span class="tui-diff-ln">41</span>
+                            <span class="tui-diff-sign">-</span>
+                            <span class="tui-diff-text">if (!token) return null;</span>
+                          </div>
+                          <div class="tui-diff-row tui-diff-row--add">
+                            <span class="tui-diff-ln">41</span>
+                            <span class="tui-diff-sign">+</span>
+                            <span class="tui-diff-text">if (!token) throw new AuthError("missing token");</span>
+                          </div>
+                          <div class="tui-diff-row">
+                            <span class="tui-diff-ln">42</span>
+                            <span class="tui-diff-sign"> </span>
+                            <span class="tui-diff-text">if (!row) return null;</span>
+                          </div>
+                        </div>
+                        <div class="tui-proposal-foot">
+                          <span>proposal 9f2a…</span>
+                          <span>preview 4 / 240 lines</span>
+                        </div>
+                      </div>
                     </div>
-                    <div class="tui-line tui-line--diff" data-line="5">
-                      <span class="tui-del">-</span> if (!token) return null
-                    </div>
-                    <div class="tui-line tui-line--diff" data-line="6">
-                      <span class="tui-add">+</span> if (!token) throw new AuthError("missing token")
-                    </div>
-                    <div class="tui-line tui-line--wait" data-line="7">
-                      <span class="tui-tool">·</span> awaiting <span class="tui-key">/apply</span>
+
+                    <p class="tui-line tui-line--note" data-line="5">
+                      No file has been changed. Review the diff, then type
+                      <code class="tui-inline-code">/apply</code> to approve or
+                      <code class="tui-inline-code">/reject</code> to discard it.
+                    </p>
+
+                    <div class="tui-line tui-line--wait" data-line="6">
+                      <span class="tui-tool">·</span> awaiting approval
                     </div>
                   </div>
 
-                  <div class="tui-input">
-                    <span class="tui-prompt">❯</span>
-                    <span class="tui-input-text" data-tui-input></span>
-                    <span class="tui-caret"></span>
+                  <div class="tui-input-block">
+                    <div class="tui-input">
+                      <span class="tui-prompt">❯</span>
+                      <span class="tui-input-text" data-tui-input></span>
+                      <span class="tui-caret"></span>
+                    </div>
+                    <p class="tui-mode"><span class="tui-mode-state">Build</span> · Llama 3.1 70B · max</p>
+                  </div>
+
+                  <div class="tui-footer">
+                    <span>~/mint-harness</span>
+                    <span>7.2k tokens</span>
                   </div>
                 </div>
               </div>
@@ -597,29 +662,33 @@
                   <span class="diff-status" data-diff-status>awaiting approval</span>
                 </div>
                 <div class="diff-file">
-                  <span>src/auth/session.ts</span>
-                  <span>+1 −1</span>
+                  <span class="diff-path">src/auth/session.ts</span>
+                  <span class="diff-counts"><span class="diff-add">+1</span> <span class="diff-del">−1</span></span>
                 </div>
                 <div class="diff-body">
                   <div class="diff-line diff-line--context" data-diff data-at="0.06">
                     <span class="diff-ln">40</span>
+                    <span class="diff-sign"> </span>
                     <code>const row = await db.get(token);</code>
                   </div>
                   <div class="diff-line diff-line--remove" data-diff data-at="0.14">
                     <span class="diff-ln">41</span>
-                    <code><b>-</b> if (!token) return null;</code>
+                    <span class="diff-sign">-</span>
+                    <code>if (!token) return null;</code>
                   </div>
                   <div class="diff-line diff-line--add" data-diff data-at="0.22">
                     <span class="diff-ln">41</span>
-                    <code><b>+</b> if (!token) throw new AuthError("missing token");</code>
+                    <span class="diff-sign">+</span>
+                    <code>if (!token) throw new AuthError("missing token");</code>
                   </div>
                   <div class="diff-line diff-line--context" data-diff data-at="0.28">
                     <span class="diff-ln">42</span>
+                    <span class="diff-sign"> </span>
                     <code>if (!row) return null;</code>
                   </div>
                 </div>
                 <div class="diff-foot">
-                  <span class="diff-hash">sha256 · 9f2a…</span>
+                  <span class="diff-hash">proposal 9f2a…</span>
                   <span class="diff-note">preview 4 / 240 lines</span>
                 </div>
               </div>
@@ -795,16 +864,16 @@ output capped at 24,000 characters</code></pre>
           <div class="cat-grid">
             <div class="cat-copy">
               <p class="drop-line" data-reveal>
-                MINT’s cat is a real portrait, drawn in code at 192 × 192 with 2× supersampling.
-                Six expressions. Twelve frames. Mood overlays for thinking, errors, sleepiness,
-                and curiosity. In the terminal it uses Kitty graphics, Sixel, or truecolor
-                quadrant blocks. Here, the same renderer runs on canvas.
+                MINT’s cat is a real PNG portrait from the harness asset pack: nine states and
+                twenty frames, from a sleepy loaf to a reading session. In the terminal it uses
+                Kitty graphics, Sixel, or truecolor quadrant blocks. Here, the same frames loop
+                in your browser with six mood remixes layered on top.
               </p>
 
               <div class="cat-facts">
-                <div data-reveal><strong>06</strong><span>expressions</span></div>
-                <div data-reveal><strong>12</strong><span>frames</span></div>
-                <div data-reveal><strong>0</strong><span>network calls</span></div>
+                <div data-reveal><strong>09</strong><span>states</span></div>
+                <div data-reveal><strong>20</strong><span>frames</span></div>
+                <div data-reveal><strong>0</strong><span>API calls</span></div>
               </div>
 
               <p class="cat-quote" data-reveal>
@@ -821,7 +890,7 @@ output capped at 24,000 characters</code></pre>
               <div class="cat-stage">
                 <div class="cat-stage-head">
                   <span>FELIS TERMINALIS</span>
-                  <span>192 × 192</span>
+                  <span>128 × 128</span>
                 </div>
 
                 <div class="cat-canvas-wrap">
@@ -829,20 +898,18 @@ output capped at 24,000 characters</code></pre>
                   <span class="cat-tick cat-tick--tr" aria-hidden="true"></span>
                   <span class="cat-tick cat-tick--bl" aria-hidden="true"></span>
                   <span class="cat-tick cat-tick--br" aria-hidden="true"></span>
-                  <canvas
+                  <img
                     class="cat-canvas"
                     data-cat-stage
-                    width="192"
-                    height="192"
-                    role="img"
-                    aria-label="Pixel art portrait of MINT the cat. Use the expression controls below to change its face."
-                  >
-                    Pixel art portrait of MINT the cat.
-                  </canvas>
+                    width="128"
+                    height="128"
+                    decoding="async"
+                    alt="MINT the cat, classic loaf expression, from the harness asset pack."
+                  />
                 </div>
 
                 <div class="cat-stage-foot">
-                  <span>frame <b data-cat-frame>00</b> / 12</span>
+                  <span>frame <b data-cat-frame>01</b> / <span data-cat-frame-total>02</span></span>
                   <span>kitty · sixel · quadrants</span>
                 </div>
               </div>
@@ -883,7 +950,7 @@ output capped at 24,000 characters</code></pre>
 
           <p class="specimen-caption">
             <span class="specimen-fig">Fig. 05</span>
-            <span>Runs entirely in your browser. The cat makes no network calls.</span>
+            <span>Runs entirely in your browser. The cat talks to no API.</span>
           </p>
         </div>
       </section>
