@@ -22,6 +22,23 @@ describe("loadConfig", () => {
     expect(config.maxToolRounds).toBe(12);
     expect(config.maxToolCallsPerTurn).toBe(24);
     expect(config.effort).toBe("max");
+    expect(config.cat.transitionMs).toBe(100);
+    expect(config.cat.oneShotSpeed).toBe(1);
+  });
+
+  test("accepts cat animation timing overrides", () => {
+    const config = loadConfig({
+      NVIDIA_API_KEY: "test-key",
+      MINT_CAT_TRANSITION_MS: "0",
+      MINT_CAT_ONESHOT_SPEED: "2",
+    });
+    expect(config.cat.transitionMs).toBe(0);
+    expect(config.cat.oneShotSpeed).toBe(2);
+  });
+
+  test("rejects invalid cat animation timing", () => {
+    expect(() => loadConfig({ NVIDIA_API_KEY: "test-key", MINT_CAT_TRANSITION_MS: "-1" })).toThrow();
+    expect(() => loadConfig({ NVIDIA_API_KEY: "test-key", MINT_CAT_ONESHOT_SPEED: "0" })).toThrow();
   });
 
   test("accepts configured positive integer agent limits", () => {
@@ -69,7 +86,7 @@ describe("writeDotEnv", () => {
       maxToolCallsPerTurn: 20,
       effort: "max",
       autoApply: "manual",
-      cat: { enabled: true, assetPack: "default", renderer: "auto", animation: true, scale: 1, idleFps: 0, workingFps: 0 },
+      cat: { enabled: true, assetPack: "default", renderer: "auto", animation: true, scale: 1, idleFps: 0, workingFps: 0, transitionMs: 100, oneShotSpeed: 1 },
     };
     writeDotEnv(config, envPath);
     const content = readFileSync(envPath, "utf8");
@@ -78,6 +95,8 @@ describe("writeDotEnv", () => {
     expect(content).toContain('NVIDIA_MODEL="meta/llama-3.3-70b"');
     expect(content).toContain("MINT_MAX_TOOL_ROUNDS=10");
     expect(content).toContain("MINT_MAX_TOOL_CALLS_PER_TURN=20");
+    expect(content).toContain("MINT_CAT_TRANSITION_MS=100");
+    expect(content).toContain("MINT_CAT_ONESHOT_SPEED=1");
   });
 
   test("preserves unrelated .env entries and comments", () => {
@@ -93,7 +112,7 @@ describe("writeDotEnv", () => {
       maxToolCallsPerTurn: 24,
       effort: "max",
       autoApply: "manual",
-      cat: { enabled: true, assetPack: "default", renderer: "auto", animation: true, scale: 1, idleFps: 0, workingFps: 0 },
+      cat: { enabled: true, assetPack: "default", renderer: "auto", animation: true, scale: 1, idleFps: 0, workingFps: 0, transitionMs: 100, oneShotSpeed: 1 },
     };
     writeDotEnv(config, envPath);
     const content = readFileSync(envPath, "utf8");
@@ -114,7 +133,7 @@ describe("writeDotEnv", () => {
       maxToolCallsPerTurn: 24,
       effort: "max",
       autoApply: "manual",
-      cat: { enabled: true, assetPack: "default", renderer: "auto", animation: true, scale: 1, idleFps: 0, workingFps: 0 },
+      cat: { enabled: true, assetPack: "default", renderer: "auto", animation: true, scale: 1, idleFps: 0, workingFps: 0, transitionMs: 100, oneShotSpeed: 1 },
     };
     writeDotEnv(config, envPath);
     const content = readFileSync(envPath, "utf8");

@@ -38,6 +38,10 @@ export interface CatConfig {
   scale: number;
   idleFps: number;
   workingFps: number;
+  /** Hold time before a state switch draws the incoming first frame. */
+  transitionMs: number;
+  /** Multiplier for one-shot frame playback; 1 keeps manifest timing. */
+  oneShotSpeed: number;
 }
 
 export interface CatEvent {

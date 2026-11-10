@@ -18,6 +18,8 @@ const EnvSchema = z.object({
   MINT_CAT_SCALE: z.coerce.number().positive().max(3).default(1),
   MINT_CAT_IDLE_FPS: z.coerce.number().nonnegative().max(30).default(0),
   MINT_CAT_WORKING_FPS: z.coerce.number().nonnegative().max(30).default(0),
+  MINT_CAT_TRANSITION_MS: z.coerce.number().int().nonnegative().max(2000).default(100),
+  MINT_CAT_ONESHOT_SPEED: z.coerce.number().min(0.25).max(4).default(1),
 });
 
 export type MintConfig = {
@@ -80,6 +82,8 @@ export function loadConfig(env?: Record<string, string | undefined>): MintConfig
     MINT_CAT_SCALE: source.MINT_CAT_SCALE ?? "1",
     MINT_CAT_IDLE_FPS: source.MINT_CAT_IDLE_FPS ?? "0",
     MINT_CAT_WORKING_FPS: source.MINT_CAT_WORKING_FPS ?? "0",
+    MINT_CAT_TRANSITION_MS: source.MINT_CAT_TRANSITION_MS ?? "100",
+    MINT_CAT_ONESHOT_SPEED: source.MINT_CAT_ONESHOT_SPEED ?? "1",
   });
 
   if (!parsed.success) {
@@ -102,6 +106,8 @@ export function loadConfig(env?: Record<string, string | undefined>): MintConfig
       scale: parsed.data.MINT_CAT_SCALE,
       idleFps: parsed.data.MINT_CAT_IDLE_FPS,
       workingFps: parsed.data.MINT_CAT_WORKING_FPS,
+      transitionMs: parsed.data.MINT_CAT_TRANSITION_MS,
+      oneShotSpeed: parsed.data.MINT_CAT_ONESHOT_SPEED,
     },
   };
 }
@@ -121,6 +127,8 @@ const MINT_KEYS = [
   "MINT_CAT_SCALE",
   "MINT_CAT_IDLE_FPS",
   "MINT_CAT_WORKING_FPS",
+  "MINT_CAT_TRANSITION_MS",
+  "MINT_CAT_ONESHOT_SPEED",
 ] as const;
 
 function writeDotEnvAtomic(
@@ -171,6 +179,8 @@ export function writeDotEnv(config: MintConfig, path = ".env"): void {
       `MINT_CAT_SCALE=${config.cat.scale}`,
       `MINT_CAT_IDLE_FPS=${config.cat.idleFps}`,
       `MINT_CAT_WORKING_FPS=${config.cat.workingFps}`,
+      `MINT_CAT_TRANSITION_MS=${config.cat.transitionMs}`,
+      `MINT_CAT_ONESHOT_SPEED=${config.cat.oneShotSpeed}`,
     ].filter(Boolean);
 
     return [...otherLines, ...newLines];

@@ -8,10 +8,10 @@ import { SessionStore, normalizeWorkspace, type StoredMessage, type Session } fr
 import { WorkspaceTools } from "./tools";
 import { ApprovedTerminal } from "./terminal";
 import { EMPTY_TOKEN_USAGE, addTokenUsage, formatTokenCount, type TokenUsage } from "./usage";
-import { catLineArtRows } from "./cat-line-art.ts";
 import { CatCompanion } from "./cat/widget.tsx";
-import { StateMapper } from "./cat/state-mapper.ts";
-import type { CatState } from "./cat/types.ts";
+import { StateMapper, type CatActivity } from "./cat/state-mapper.ts";
+import { CatClock } from "./cat/clock.ts";
+import { loadPack } from "./cat/manifest.ts";
 import {
   MAX_PASTE_CHARS,
   sanitizePastedText,
@@ -43,6 +43,7 @@ import {
 import { createHostClipboard, createClipboard, createRendererClipboardAdapter, decodePasteBytes, stripAnsiSequences, SyntaxStyle } from "@opentui/core";
 import type { CliRenderer } from "@opentui/core";
 import { parseMessageSegments, parseDiffBlock, type MessageSegment } from "./message-segments";
+import { fitTextMiddle, formatClockTime, textWidth } from "./ui-format.ts";
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -447,15 +448,18 @@ function App() {
   });
   const [history, setHistory] = createSignal<ChatMessage[]>([systemMessage()]);
   const store = new SessionStore();
-  const [catPhase, setCatPhase] = createSignal(0);
-  const [catState, setCatState] = createSignal<CatState>("hi");
   const catMapper = new StateMapper();
-  let talkedThisTurn = false;
+  const [catPhase, setCatPhase] = createSignal(0);
+  const [catActivity, setCatActivity] = createSignal<CatActivity>(catMapper.activity);
+  let talkedThisRound = false;
+  const catEnabled = () => catPrefs?.enabled ?? true;
   const catEvent = (event: Parameters<StateMapper["handle"]>[0]) => {
-    setCatState(catMapper.handle(event, Date.now()).state);
+    if (!catEnabled()) return;
+    setCatActivity(catMapper.handle(event, catPhase()));
   };
   const tickCat = () => {
-    setCatState(catMapper.tick(Date.now()).state);
+    if (!catEnabled()) return;
+    setCatActivity(catMapper.tick(catPhase()));
   };
   let successTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -698,6 +702,32 @@ const showTokenUsage = () => terminal().width >= 48;
   const statusGlyph = () => status() === "connected" ? "●" : status() === "error" ? "✗" : "◌";
   const statusLabel = () => status() === "connected" ? "connected" : status() === "error" ? "error" : "connecting";
 
+  // Live wall clock in the header. One low-frequency timer, cleaned up with the
+  // component; it is intentionally separate from the cat animation clock.
+  const [clockTime, setClockTime] = createSignal(formatClockTime(new Date()));
+  const wallClockTimer = setInterval(() => setClockTime(formatClockTime(new Date())), 1000);
+  onCleanup(() => clearInterval(wallClockTimer));
+
+  const headerClockVisible = () => terminal().width >= 40;
+  const headerStatus = () =>
+    terminal().width >= 56 ? `${statusGlyph()} ${statusLabel()}` : statusGlyph();
+  // Right cluster: title, divider, status, then divider + clock when shown.
+  const headerRightChrome = () =>
+    (headerClockVisible() ? 4 : 2)
+    + 1 // title -> divider gap is counted by the cluster's `gap`
+    + textWidth(headerStatus())
+    + (headerClockVisible() ? 1 + 8 : 0);
+  const headerTitleWidthWith = (slogan: boolean) =>
+    // Outer padding (2), brand (6), the optional slogan block, the gap between
+    // clusters (1), fixed right-side chrome, and one safety cell.
+    Math.max(0, terminal().width - 2 - 6 - (slogan ? 1 + 23 : 0) - 1 - headerRightChrome() - 1);
+  // Keep the slogan when the session name still fits beside it; drop it before
+  // shortening the name. This keeps the header compact without hiding titles.
+  const headerSloganVisible = () =>
+    terminal().width >= 72 && textWidth(getSessionTitle()) <= headerTitleWidthWith(true);
+  const headerTitleWidth = () => headerTitleWidthWith(headerSloganVisible());
+  const headerTitle = () => fitTextMiddle(getSessionTitle(), headerTitleWidth());
+
   const persist = (message: StoredMessage) => {
     const sid = session();
     if (sid) {
@@ -714,7 +744,7 @@ const showTokenUsage = () => terminal().width >= 48;
   const startNewSession = () => {
     setSession(null);
     setDraftSessionTitle("");
-    catEvent({ type: "sessionWaiting" });
+    catEvent({ type: "sessionStarted" });
     setHistory([systemMessage()]);
     setMessages([{ role: "assistant", content: `Fresh session! Send a message to save it. ♡` }]);
     setNotice("draft session ready");
@@ -751,6 +781,7 @@ const showTokenUsage = () => terminal().width >= 48;
     setMessages(stored.filter((m) => m.role !== "system"));
     setModel(found.model || model());
     setNotice(`resumed session ${id}`);
+    catEvent({ type: "sessionWaiting" });
     // Clear transient state on resume
     pendingProposalId = undefined;
     pendingCommandId = undefined;
@@ -967,7 +998,7 @@ const showTokenUsage = () => terminal().width >= 48;
         maxToolCallsPerTurn: agentLimits.maxToolCallsPerTurn,
         effort: "max",
         autoApply: "manual",
-        cat: { enabled: true, assetPack: "default", renderer: "auto", animation: true, scale: 1, idleFps: 0, workingFps: 0 },
+        cat: { enabled: true, assetPack: "default", renderer: "auto", animation: true, scale: 1, idleFps: 0, workingFps: 0, transitionMs: 100, oneShotSpeed: 1 },
       };
       writeDotEnv(mergedConfig);
 
@@ -1661,7 +1692,7 @@ const showTokenUsage = () => terminal().width >= 48;
     setBusy(true);
     setModeLocked(true);
     catEvent({ type: "modelThinking" });
-    talkedThisTurn = false;
+    talkedThisRound = false;
     activeController = new AbortController();
     setNotice(`thinking with ${model()}…`);
 
@@ -1673,6 +1704,7 @@ const showTokenUsage = () => terminal().width >= 48;
       const repeatedCallGuard = new RepeatedCallGuard();
       while (budget.startRound()) {
         answer = "";
+        talkedThisRound = false;
         setMessages((old) => {
           const next = [...old];
           const last = next[next.length - 1];
@@ -1687,8 +1719,8 @@ const showTokenUsage = () => terminal().width >= 48;
           if (event.type === "content") {
             answer += event.content;
             setStreamingContent(answer);
-            if (!talkedThisTurn) {
-              talkedThisTurn = true;
+            if (!talkedThisRound) {
+              talkedThisRound = true;
               catEvent({ type: "responseStreaming" });
             }
           } else if (event.type === "usage") {
@@ -1795,6 +1827,8 @@ const showTokenUsage = () => terminal().width >= 48;
             setMessages((old) => [...old, { role: "assistant", content: "· awaiting /run", kind: "approval" }]);
           }
         }
+        // Tool results go back to the model; the next round is reasoning.
+        catEvent({ type: "modelThinking" });
       }
       if (!completed) {
         if (!answer.includes("limit reached:")) {
@@ -1816,12 +1850,19 @@ const showTokenUsage = () => terminal().width >= 48;
       }
       setNotice("ready ♡");
       catEvent({ type: "operationCompleted" });
+      // The success one-shot owns the screen, but the underlying state is now
+      // waiting for the user, so it settles to idle after the celebration.
+      catEvent({ type: "sessionWaiting" });
     } catch (error) {
       cancelStreamingPreview();
       const aborted = activeController?.signal.aborted ?? false;
       const message = aborted ? "Request cancelled." : error instanceof Error ? error.message : "Unknown NVIDIA API error";
-      if (aborted) catEvent({ type: "sessionWaiting" });
-      else catEvent({ type: "operationFailed" });
+      if (aborted) {
+        catEvent({ type: "cancelled" });
+      } else {
+        catEvent({ type: "operationFailed" });
+        catEvent({ type: "sessionWaiting" });
+      }
       setMessages((old) => {
         const next = [...old];
         const last = next[next.length - 1];
@@ -1844,6 +1885,7 @@ const showTokenUsage = () => terminal().width >= 48;
   try {
     const config = loadConfig();
     catPrefs = config.cat;
+    catMapper.setManifest(loadPack(config.cat.assetPack).manifest);
     client = new NvidiaClient(config.apiKey, config.baseUrl);
     configuredModel = config.preferredModel;
     agentLimits = { maxToolRounds: config.maxToolRounds, maxToolCallsPerTurn: config.maxToolCallsPerTurn };
@@ -1854,16 +1896,47 @@ const showTokenUsage = () => terminal().width >= 48;
     setNotice(error instanceof Error ? error.message : "Configuration error");
   }
 
-  const catPhaseTimer = setInterval(() => {
+  // One clock owns the cat animation. It never schedules an interval when the
+  // companion is disabled or the sidebar is hidden, and pauses while the
+  // terminal is unfocused.
+  const catClock = new CatClock(() => {
     setCatPhase((phase) => phase + 100);
     tickCat();
-  }, 100);
-  onCleanup(() => clearInterval(catPhaseTimer));
+  });
+  let catFocused = true;
+  const syncCatClock = () => {
+    const shouldRun = catEnabled() && sidebarVisible() && catFocused;
+    catClock.setEnabled(shouldRun);
+    if (shouldRun) catClock.start();
+  };
+  syncCatClock();
+  createEffect(() => {
+    // Re-evaluate when the terminal is resized across the sidebar breakpoint.
+    void terminal().width;
+    syncCatClock();
+  });
 
-  // Greet once at session start; the mapper settles back to idle.
+  const handleCatFocus = () => {
+    catFocused = true;
+    syncCatClock();
+  };
+  const handleCatBlur = () => {
+    catFocused = false;
+    syncCatClock();
+  };
+  renderer.on("focus", handleCatFocus);
+  renderer.on("blur", handleCatBlur);
+
+  onCleanup(() => {
+    catClock.dispose();
+    renderer.off("focus", handleCatFocus);
+    renderer.off("blur", handleCatBlur);
+  });
+
+  // Greet once at session start; the mapper settles back to the underlying
+  // state (idle, or a working state if work begins immediately).
   onMount(() => {
     catEvent({ type: "sessionStarted" });
-    setCatState(catMapper.activity.state);
   });
 
   // Paste handler (terminal bracketed paste)
@@ -2259,40 +2332,39 @@ const showTokenUsage = () => terminal().width >= 48;
   };
 
   return (
-    <box flexDirection="column" backgroundColor={colors.bg} width="100%" height="100%">
-      <box flexDirection="column" backgroundColor={colors.panel} width="100%" minWidth={0} flexShrink={0} overflow="hidden" border={["bottom"]} borderColor={colors.rule}>
-        <box flexDirection="row" justifyContent="space-between" paddingLeft={1} paddingRight={1} width="100%" minWidth={0} overflow="hidden">
-          <box flexDirection="row" gap={1} minWidth={0} flexShrink={1}>
-            <Show when={terminal().width >= 52}>
-              <ascii_font text="MINT" font="tiny" color={colors.pink} backgroundColor="transparent" selectable={false} />
-            </Show>
-            <Show when={terminal().width < 52}>
-              <text fg={colors.pink} wrapMode="none" flexShrink={0}>✿ MINT</text>
-            </Show>
-            <Show when={terminal().width >= 72}>
-              <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>/ tiny coding companion</text>
+    <box flexDirection="column" backgroundColor="transparent" width="100%" height="100%">
+      <box flexDirection="column" backgroundColor="transparent" width="100%" minWidth={0} flexShrink={0} overflow="hidden" border={["bottom"]} borderColor={colors.rule}>
+        <box flexDirection="row" justifyContent="space-between" gap={1} paddingLeft={1} paddingRight={1} width="100%" minWidth={0} overflow="hidden">
+          <box flexDirection="row" gap={1} minWidth={0} flexShrink={0} alignItems="center">
+            <text wrapMode="none" flexShrink={0}>
+              <span style={{ fg: colors.pink }}>✿</span>
+              <span style={{ fg: colors.muted }}> mint</span>
+            </text>
+            <Show when={headerSloganVisible()}>
+              <text fg={colors.muted} wrapMode="none" flexShrink={1} minWidth={0} truncate={true}>/ tiny coding companion</text>
             </Show>
           </box>
-          <box flexDirection="row" alignItems="center" justifyContent="flex-end" gap={1} flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
-            <box flexShrink={1} minWidth={0} overflow="hidden">
-              <text fg={colors.lavender} wrapMode="none" width="100%">{getSessionTitle()}</text>
-            </box>
+          <box flexDirection="row" alignItems="center" justifyContent="flex-end" gap={1} flexShrink={1} minWidth={0} overflow="hidden">
+            <text fg={colors.lavender} wrapMode="none" flexShrink={1} minWidth={0} truncate={true}>{headerTitle()}</text>
             <text fg={colors.rule} wrapMode="none" flexShrink={0}>│</text>
-            <text fg={statusColor()} wrapMode="none" flexShrink={0}>
-              {terminal().width >= 56 ? `${statusGlyph()} ${statusLabel()}` : statusGlyph()}
-            </text>
+            <text fg={statusColor()} wrapMode="none" flexShrink={0}>{headerStatus()}</text>
+            <Show when={headerClockVisible()}>
+              <text fg={colors.rule} wrapMode="none" flexShrink={0}>│</text>
+              <text fg={colors.muted} wrapMode="none" flexShrink={0}>{clockTime()}</text>
+            </Show>
           </box>
         </box>
       </box>
 
       <box flexDirection="row" gap={1} flexGrow={1} minWidth={0} minHeight={0} width="100%" overflow="hidden">
         <Show when={sidebarVisible()}>
-        <box flexDirection="column" backgroundColor={colors.panel} border={["right"]} borderColor={colors.rule} padding={1} width={sidebarMetrics().sidebarWidth} minWidth={scaledCells(28)} height="100%" minHeight={0} flexShrink={0} gap={0} overflow="hidden">
+        <box flexDirection="column" backgroundColor="transparent" border={["right"]} borderColor={colors.rule} padding={1} width={sidebarMetrics().sidebarWidth} minWidth={scaledCells(28)} height="100%" minHeight={0} flexShrink={0} gap={0} overflow="hidden">
           <CatCompanion
-            width={Math.max(24, sidebarMetrics().sidebarWidth - 2)}
-            height={Math.max(15, terminal().height - 16)}
+            width={Math.max(1, sidebarMetrics().sidebarWidth - 3)}
+            height={Math.max(6, terminal().height - 16)}
             phase={catPhase()}
-            state={catState()}
+            state={catActivity().state}
+            activity={catActivity()}
             enabled={catPrefs?.enabled ?? true}
             pack={catPrefs?.assetPack ?? "default"}
             renderer={catPrefs?.renderer ?? "auto"}
@@ -2300,7 +2372,9 @@ const showTokenUsage = () => terminal().width >= 48;
             scale={catPrefs?.scale ?? 1}
             idleFps={catPrefs?.idleFps ?? 0}
             workingFps={catPrefs?.workingFps ?? 0}
-            colors={{ divider: colors.catLine, ascii: { transparent: colors.bg, outline: colors.catLine, body: colors.lavender, light: colors.pink, eye: colors.peach } }}
+            transitionMs={catPrefs?.transitionMs ?? 100}
+            oneShotSpeed={catPrefs?.oneShotSpeed ?? 1}
+            colors={{ divider: colors.catLine, ascii: { transparent: "transparent", outline: colors.catLine, body: colors.lavender, light: colors.pink, eye: colors.peach } }}
           />
           <scrollbox flexGrow={1} minHeight={0} width="100%" overflow="hidden" verticalScrollbarOptions={{ visible: false }}>
             <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0}>
@@ -2349,7 +2423,7 @@ const showTokenUsage = () => terminal().width >= 48;
         </box>
       </Show>
 
-        <box flexGrow={1} minWidth={0} minHeight={0} width="100%" flexDirection="column" backgroundColor={colors.bg} paddingTop={1} paddingLeft={1} paddingRight={1} paddingBottom={0} gap={1} overflow="hidden">
+        <box flexGrow={1} minWidth={0} minHeight={0} width="100%" flexDirection="column" backgroundColor="transparent" paddingTop={1} paddingLeft={1} paddingRight={1} paddingBottom={0} gap={1} overflow="hidden">
           <box flexDirection="row" justifyContent="space-between" width="100%" minWidth={0} flexShrink={0} overflow="hidden" border={["bottom"]} borderColor={colors.rule}>
             <text fg={colors.lavender} wrapMode="none">✧ chat ✧</text>
             <Show when={!sidebarVisible()}>
@@ -2461,7 +2535,7 @@ const showTokenUsage = () => terminal().width >= 48;
             </box>
           </Show>
           <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
-            <box backgroundColor={colors.panel} border={["top"]} borderColor={colors.rule} paddingLeft={1} paddingRight={1} paddingBottom={0} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
+            <box backgroundColor="transparent" border={["top"]} borderColor={colors.rule} paddingLeft={1} paddingRight={1} paddingBottom={0} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
               {inputLines() > 1 ? (
                 <scrollbox height={Math.min(inputLines(), MAX_INPUT_LINES)} minHeight={1} width="100%" minWidth={0} overflow="hidden" stickyScroll={true} stickyStart="bottom">
                   <text fg={colors.mint} wrapMode="char" width="100%">❯ {input().slice(0, cursorPos())}<span style={{ fg: colors.bg, bg: colors.mint }}>{cursorGlyph()}</span>{input().slice(cursorPos() + cursorAdvance())}</text>
