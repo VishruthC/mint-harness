@@ -1,148 +1,117 @@
-# ✿ MINT
+# MINT
 
 A cute, terminal-native coding harness inspired by OpenCode's architecture, independently implemented and **NVIDIA API-only**.
 
-> Current milestone: Interactive MINT harness — OpenTUI chat, NVIDIA NIM streaming, SQLite sessions, model-callable workspace tools, targeted patch proposals, project-context discovery, approval-gated restricted terminal commands, repeated-tool-loop safeguards, and a minimalist line-art cat mascot. Web browsing is not implemented.
+> Interactive OpenTUI chat with NVIDIA NIM streaming, SQLite sessions, model-callable workspace tools, targeted patch proposals, project-context discovery, approval-gated restricted terminal commands, repeated-tool-loop safeguards, and a line-art cat mascot. Web browsing is not implemented.
 
 ## Requirements
 
-- Bun **1.3.14+** (OpenTUI's current runtime requirement; see its runtime matrix)
-- An NVIDIA API key with access to at least one hosted model
-- A supported terminal (Linux x64, macOS, or Windows x64/WSL; see OpenTUI's current platform matrix)
+- **Bun >= 1.3.14** (required at runtime, even when installed via npm; see OpenTUI runtime requirements)
+- An **NVIDIA API key** with access to at least one hosted model
+- A supported terminal (Linux x64, macOS, or Windows x64/WSL; see OpenTUI platform support)
 
-## Start
-
-Clone the harness once, install dependencies, add your key, and launch the first chat.
-
-**PowerShell**
-
-```powershell
-git clone https://github.com/VishruthC/mint-harness.git
-cd mint-harness
-bun install
-Copy-Item .env.example .env
-notepad .env
-bun run install:minth
-bun run first-chat
-```
-
-**macOS / Linux**
+## Install (npm)
 
 ```bash
-git clone https://github.com/VishruthC/mint-harness.git
-cd mint-harness
-bun install
-cp .env.example .env
-${EDITOR:-nano} .env
-bun run install:minth
-bun run first-chat
+npm install -g mint-harness
 ```
 
-`bun run first-chat` creates `initial chat` inside the harness directory and starts MINT there. After that, run `minth` from any project directory:
+Then run MINT from the directory you want it to work in:
 
 ```bash
 cd ~/Projects/my-app
 minth
 ```
 
-MINT uses the directory you launch it from as the workspace and only shows sessions created in that exact directory. The harness's own `.env` and dependencies stay in the cloned `mint-harness` directory. If you move the cloned folder, rerun `bun run install:minth` so `minth` points at the new location.
+MINT uses the directory you launch it from as the workspace and only shows sessions created in that exact directory. Session data is stored in `~/.mint/mint.sqlite` by default (set `MINT_DATA_DIR` to override).
 
-In `.env`, set `NVIDIA_API_KEY` to your NVIDIA API key. Optionally set `NVIDIA_MODEL` to a model ID available to your account. `MINT_MAX_TOOL_ROUNDS` and `MINT_MAX_TOOL_CALLS_PER_TURN` configure the per-user-turn agent limits (defaults: `12` rounds and `24` calls); both must be positive integers. **Changes require a restart of MINT.** Do not share or commit `.env`.
+> **Note:** MINT ships as TypeScript source and is executed with Bun. Make sure `bun` is installed and available on your `PATH`. Global npm installs place the package under your npm prefix; the launcher runs Bun from the package root and preserves your launch directory as the workspace.
 
-MINT uses `https://integrate.api.nvidia.com/v1` by default. Set `NVIDIA_MODEL` to a model ID you can access, or leave it blank and choose from the models returned by the API.
+## Configure
 
-## Current commands
+Set your NVIDIA credentials in the environment or in a `.env` file in the directory where you launch `minth` (or use the in-app `/connect` flow):
 
-- `/help` — show available commands
-- `/models` — refresh and list NVIDIA models (or open model picker)
-- `/model` — open interactive model picker
-- `/model <id>` — select a model directly (persists to `.env`)
-- `/connect` — configure NVIDIA API credentials (opens secure popup)
-- `/session` — list or resume sessions (interactive picker)
-- `/session new` — start a fresh session
-- `/session delete <id>` — delete a session
-- `/session rename` — rename active session (opens popup)
-- `/session rename <name>` — rename active session directly
-- `/limits` — show current agent limits (rounds/calls) and config keys
-- `/cancel` — cancel an in-progress response
-- `/clear` — start a fresh session (old sessions remain saved)
-- `/quit` — exit MINT
-- `Shift+Enter` — insert a newline; `Enter` sends
+```dotenv
+# Required
+NVIDIA_API_KEY=
 
-### Mouse support
+# Optional
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_MODEL=
 
-MINT now supports full mouse interaction across all menus:
+# Agent safety limits (positive integers)
+MINT_MAX_TOOL_ROUNDS=12
+MINT_MAX_TOOL_CALLS_PER_TURN=24
 
-- **All popups** (`/connect`, `/model`, `/models`, `/session`, `/session rename`): Click outside to close, click buttons to act, click list rows to select
-- **Model picker**: Click a model to select and persist it; wheel scrolls the list; Refresh/Clear/Close buttons
-- **Session picker**: Click a session to resume; wheel scrolls; New Session/Close buttons
-- **Command palette** (`/`): Hover highlights; click to execute or prefill; wheel moves selection
-- **Sidebar**: Click session name to rename, model name to open picker, status to open `/connect`
-- **Toast notifications**: Click to dismiss
-- **Chat area**: Wheel scrolls; drag-select auto-copies to clipboard
+# Effort level hint (low, medium, high, max; default max)
+MINT_EFFORT=max
+```
 
-All mouse actions have keyboard equivalents (↑/↓, Enter, Esc, PgUp/PgDn, Home/End, Tab).
+MINT uses `https://integrate.api.nvidia.com/v1` by default. Set `NVIDIA_MODEL` to a model ID you can access, or leave it blank and choose from the models returned by the API. **Changes to `.env` require restarting MINT.** Do not share or commit `.env`.
 
-### Clipboard shortcuts
+## Run from source (development)
 
-- `Ctrl+Shift+V` / `Ctrl+V` / `Shift+Insert` — paste from system clipboard
-- `Ctrl+Shift+C` — copy current selection (shows toast notification)
-- `Ctrl+C` — copy selection if one exists, otherwise abort/exit
-- Mouse selection — automatically copies to clipboard on release
+```bash
+git clone https://github.com/VishruthC/mint-harness.git
+cd mint-harness
+bun install
+cp .env.example .env
+# edit .env and set NVIDIA_API_KEY
+bun run dev
+```
 
-### Secure `/connect` popup
+You can also create a local launcher in the source checkout with `bun run install:minth`, or point the workspace explicitly with `MINT_WORKSPACE="$HOME/Projects/my-app" bun run dev`.
 
-`/connect` opens a centered in-TUI popup for API key entry:
+## Commands
 
-- API key input is **always masked** (shows `•` characters)
-- Click any field to focus it (cursor moves to end)
-- Paste your key with `Ctrl+Shift+V` — the raw key never appears in chat history, logs, or SQLite
-- Tab/Shift+Tab to navigate between API Key, Base URL, and Model fields
-- Backspace/Delete/Left/Right/Home/End work correctly in all fields
-- Enter to test connection and save to `.env`; Esc to cancel
-- Click Connect/Cancel buttons or click outside to close
-- Connection is validated against NVIDIA before writing
+- `/help` - show available commands
+- `/models` - refresh and list NVIDIA models (or open model picker)
+- `/model` - open interactive model picker
+- `/model <id>` - select a model directly (persists to `.env`)
+- `/connect` - configure NVIDIA API credentials (opens secure popup)
+- `/session` - list or resume sessions (interactive picker)
+- `/session new` - start a fresh session
+- `/session delete <id>` - delete a session
+- `/session rename` - rename active session (opens popup)
+- `/session rename <name>` - rename active session directly
+- `/limits` - show current agent limits (rounds/calls) and config keys
+- `/workspace` - show the active workspace root
+- `/capabilities` - show capabilities actually registered in this harness
+- `/project` - inspect project context (manifests, docs, .gitignore)
+- `/ls [path]` - list a directory relative to the workspace
+- `/read <path>` - read a text file relative to the workspace
+- `/search <text>` - search text files in the workspace
+- `/propose <path>` - propose a file replacement (then send full content)
+- `/apply` / `/reject` - approve or discard a pending file proposal
+- `/cancel-write` - cancel write input or discard the current proposal
+- `/command <cmd>` - propose an allowlisted terminal command
+- `/run` / `/reject-command` - approve or discard a pending command
+- `/cancel` - cancel an in-progress response
+- `/clear` - start a fresh session (old sessions remain saved)
+- `/quit` - exit MINT
+- `Shift+Enter` - insert a newline; `Enter` sends
 
-No local-model or alternate-cloud-provider setup is included.
+## Mouse & keyboard
 
-## Session storage
-
-Conversation history is stored in SQLite at `~/.mint/mint.sqlite` by default. Set `MINT_DATA_DIR` to change the data directory. The directory is created with restrictive permissions and the database file is set to owner-only permissions where supported. Back up this file if you want to preserve sessions.
-
-### Session management
-
-- `/session` — opens interactive picker (↑/↓ to navigate, PgUp/PgDn, Home/End, Enter to resume, Esc to cancel, or type 1-9)
-- `/session <id>` — resume a specific session directly
-- `/session new` — create a fresh session
-- `/session delete <id>` — remove a saved session
-- `/session rename` — open rename popup for active session
-- `/session rename <name>` — rename active session directly (64 char max)
-
-Each session stores its own model selection, which is restored on resume. Sessions are created lazily on the first user message.
+- **Popups/menus:** click outside to close, click items/buttons to act, wheel scrolls lists. Keyboard equivalents: arrows, Enter, Esc, PgUp/PgDn, Home/End, Tab.
+- **Clipboard:** `Ctrl+Shift+V` / `Ctrl+V` / `Shift+Insert` to paste; `Ctrl+Shift+C` to copy selection; `Ctrl+C` copies selection if present, otherwise aborts/exits. Mouse selection auto-copies on release.
 
 ## Security notes
 
-- Never commit `.env` or paste an API key into source code.
-- This version reads the key from `NVIDIA_API_KEY`; OS credential-store integration remains a follow-up. Keep `.env` private and do not commit it.
-- MINT has a capability registry that generates the system prompt and model-callable tool list from the actual active workspace state.
-- The model can invoke workspace listing, reading, searching, and file-proposal tools through the NVIDIA-compatible tool-call API. Tool results are returned to the model before it produces a final answer.
-- MINT can inspect workspace files and supports explicit approval-gated file replacement proposals.
-- Terminal commands are allowlisted, previewed with the working directory and timeout, and executed only after the user explicitly types `/run`. The model can propose commands but cannot approve them. Shell operators/redirection are blocked; command arguments can still have side effects, so inspect every preview. Web browsing and external-app control are unavailable.
-- MINT respects common root `.gitignore` patterns while listing/searching and can discover project manifests, README/AGENTS files, and project type with `/project` or `workspace_project_context`.
-- Small file edits can use exact-text patch proposals; every patch still requires `/apply`. Replacement preserves existing file permission bits where supported.
-- To check the project on Windows PowerShell, run `bun run check:windows` (or run `bun run typecheck` and `bun test` separately).
+- Never commit `.env` or paste an API key into source code. `/connect` masks the key and validates before writing to `.env`.
+- MINT derives its system prompt and model-callable tools from the active capability registry. The model can propose file changes and terminal commands, but writes require explicit `/apply` and commands require explicit `/run`.
+- Workspace tools reject paths outside the workspace, refuse symlinks that resolve outside it, cap sizes, and skip common generated/sensitive files (e.g. `.env`, private keys). These safeguards are defense-in-depth; review proposals before approving.
+- Terminal commands are allowlisted, previewed (cwd/timeout), and single-use on approval. Shell operators/redirection are blocked, but approved commands/scripts can still have side effects—inspect every preview.
 
-## Architecture (initial slice)
+## Session storage
 
-```text
-OpenTUI + SolidJS
-       │
-       ▼
-Chat/session state ─── NVIDIA provider client
-       │                        │
-       ▼                        ▼
-Conversation UI          /v1/models
-                         /v1/chat/completions (SSE)
+Conversation history is stored in SQLite at `~/.mint/mint.sqlite` by default. Set `MINT_DATA_DIR` to change the data directory. Each session stores its model selection and is scoped to the workspace directory it was created in.
+
+## Windows checks (source)
+
+```powershell
+bun install
+bun run check:windows
 ```
 
 ## References
@@ -153,75 +122,4 @@ Conversation UI          /v1/models
 
 ## License
 
-The MINT source is currently provided for private development. Add a project license before redistributing.
-
-
-## Read-only workspace tools (Phase 3)
-
-MINT can inspect the directory it was launched from, or the directory set with `MINT_WORKSPACE`. File changes are approval-gated; restricted terminal commands require a preview and explicit `/run` approval.
-
-Commands:
-
-- `/workspace` — show the active workspace root
-- `/capabilities` — show capabilities actually registered in this harness
-- `/ls [path]` — list a directory relative to the workspace
-- `/read <path>` — read a text file relative to the workspace
-- `/search <text>` — search text files in the workspace
-
-The tools reject paths outside the workspace, refuse symlinks that resolve outside it, cap file/output sizes, and skip common generated directories and sensitive files such as `.env` and private-key files. These safeguards are defense-in-depth, not a substitute for reviewing tool behavior.
-
-## Controlled file editing (Phase 4)
-
-MINT supports targeted exact-text patch proposals for small edits and a full-file replacement workflow for larger rewrites:
-
-1. Run `/propose relative/path.ext`.
-2. Send the complete replacement content in the next message (use Shift+Enter for multiple lines).
-3. Review the preview shown by MINT.
-4. Type `/apply` to approve or `/reject` to discard. `/cancel-write` cancels input or discards the current proposal.
-
-MINT does not write the target file while preparing the preview. It rejects sensitive filenames, unrecognized/binary file types, paths outside the workspace, symlink targets, and oversized content. Before applying, it checks whether the original file changed since preview. Restricted terminal commands require a preview and explicit `/run` approval. Review every diff carefully before approving it.
-
-Launch MINT from the directory you want it to work in:
-
-```bash
-cd "$HOME/Projects/my-app"
-minth
-```
-
-For source development, `MINT_WORKSPACE="$HOME/Projects/my-app" bun run dev` still works.
-
-
-## Harness-aware agent tools
-
-MINT now derives its system instructions from the same capability registry that controls model-callable tools. Use `/capabilities` to inspect what this running instance actually exposes. The model can call the registered workspace tools during a turn, receive their results, and then answer. Unknown tools are rejected. File changes remain proposals until the user explicitly approves them with `/apply`.
-
-The NVIDIA model/API must support OpenAI-compatible streamed function/tool calls for automatic tool use to work. If the selected model or endpoint rejects the `tools` field, MINT reports the API error rather than pretending the tool ran. The agent loop defaults to 12 tool rounds and 24 total tool calls per user turn, configurable with `MINT_MAX_TOOL_ROUNDS` and `MINT_MAX_TOOL_CALLS_PER_TURN` (restart MINT after changing). Counters reset for each new user message. Stable repeated calls are detected only when both the arguments and returned result remain unchanged; changed results are allowed through. Internet browsing, unrestricted local-file access, and external integrations are not implemented.
-
-
-## Project understanding and patch-based edits
-
-Use `/project` to inspect common manifests, README/AGENTS documentation, and the root `.gitignore`. The agent can call `workspace_project_context` when it needs project conventions. Workspace listing/search respects common `.gitignore` patterns alongside built-in exclusions for generated and sensitive files.
-
-For a small change, the model can use `workspace_propose_patch` with exact `find` and `replace` strings. Each `find` must match exactly once; ambiguous or stale patches are rejected. The result is only a proposal until `/apply` is explicitly entered. Larger rewrites may still use `workspace_propose_write`.
-
-## Approved terminal commands
-
-`/command bun run typecheck` creates a preview without executing it. Inspect the executable/arguments, workspace-relative directory, and timeout; then type `/run` to approve the single-use proposal or `/reject-command` to discard it. The agent's `terminal_propose` tool follows the same flow and cannot self-approve. Only registered executables are allowed, shell operators and redirection are blocked, and execution is capped at 120 seconds with bounded output. This is a safety layer, not a sandbox: approved package scripts and build tools can still perform consequential operations.
-
-## Windows checks
-
-```powershell
-bun install
-bun run check:windows
-```
-
-The PowerShell check script runs TypeScript type-checking first and stops if it fails, then runs the Bun test suite.
-
-
-## Line-art cat mascot
-
-At the top of the left sidebar, MINT shows a small PNG cat sitting on a divider: real PNG frames (128×128 manifest canvas) from `src/cat/assets/default/`, rendered through OpenTUI's image protocols (Kitty/Sixel/blocks) with a pixel-art fallback. Frames are selected by the app's real activity (greeting on start, thinking while reasoning, talking while streaming, reading/writing/tools, success/failure reactions) via `manifest.json`. One-shots play in full, return to the current working state on their original frame clock, and use clean frame-boundary transitions; priorities and timing are documented in `src/cat/assets/README.md`. The header brand is a single compact line, `✿ mint`, and the top-right cluster shows the session name, connection status, and a live `HH:MM:SS` clock. Long session names are fitted with a middle ellipsis before rendering, so drag-copy never picks up characters that are not on screen. The header, sidebar, chat, and input surfaces are transparent so they inherit the terminal's own background. Borders, text colors, and selection indicators are unchanged. The muted lavender palette reuses the existing theme tokens (`#777184` outline, `#cba6f7` body, `#f5c2e7` highlight, `#fab387` eyes); shipped frames carry a baked `#1E1E2E` background, so that rectangle remains visible inside the image box on terminals with a different background.
-
-The sidebar's `SESSIONS` section sits below the companion. The input area is borderless, with a single hairline above the prompt and a metadata line below it: `Plan · <model> · <effort>` (mode, prettified model name, and effort level). Directly below it, a compact footer line shows the workspace path and git branch, with the current session's cumulative token usage on the right. Token counts come from the provider's streamed usage report and are stored per session, so they survive restarts and resume.
-
-**Effort level** — set `MINT_EFFORT` in `.env` (`low`, `medium`, `high`, `max`; default `max`). This is displayed in the input box metadata line and passed as a hint to the model where supported.
+MIT — see [LICENSE](./LICENSE).

@@ -6,6 +6,7 @@ on:
     paths:
       - "website/**"
       - "src/cat-art.ts"
+      - "src/cat/assets/**"
       - ".github/workflows/deploy-website.yml"
   workflow_dispatch:
 

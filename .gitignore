@@ -5,7 +5,13 @@ initial chat/
 .env.*
 !.env.example
 *.log
+*.tgz
+cap*.txt
+capdbg*.*
+capfix*.*
+caprepo*.*
 .DS_Store
 test-diff.tsx
+test.tsx
 .agents/
 .claude/

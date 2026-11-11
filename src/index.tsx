@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 import { render, useKeyboard, useRenderer, useTerminalDimensions, usePaste, useSelectionHandler } from "@opentui/solid";
 import { For, Show, createMemo, createSignal, createEffect, onCleanup, onMount, JSX } from "solid-js";
 import { loadConfig, writeDotEnv, updateDotEnvModel, updateDotEnvAutoApply, type MintConfig } from "./config";
@@ -44,6 +46,17 @@ import { createHostClipboard, createClipboard, createRendererClipboardAdapter, d
 import type { CliRenderer } from "@opentui/core";
 import { parseMessageSegments, parseDiffBlock, type MessageSegment } from "./message-segments";
 import { fitTextMiddle, formatClockTime, textWidth } from "./ui-format.ts";
+import {
+  ApprovalQueue,
+  actionLabel,
+  createApplyRequest,
+  createCommandPermissionRequest,
+  moveActionIndex,
+  type ApprovalAction,
+  type ApprovalRequest,
+} from "./approval.ts";
+import { PermissionStore } from "./permission-store.ts";
+import { ApprovalPanel } from "./ApprovalPanel.tsx";
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -435,6 +448,25 @@ function App() {
   let lastApproval: { kind: "file" | "command"; id: string; status: string; automatic?: boolean } | undefined;
   let autoApply: "manual" | "auto" = "manual";
   let catPrefs: MintConfig["cat"] | null = null;
+
+  const permissionStore = new PermissionStore();
+  const approvalQueue = new ApprovalQueue();
+  const [approvalCurrent, setApprovalCurrent] = createSignal<ApprovalRequest | undefined>(undefined);
+  const [approvalActionIndex, setApprovalActionIndex] = createSignal(0);
+  const [approvalFullscreen, setApprovalFullscreen] = createSignal(false);
+  const [approvalResolving, setApprovalResolving] = createSignal(false);
+  const [approvalQueueSize, setApprovalQueueSize] = createSignal(0);
+  let approvalSeq = 0;
+  let pendingProposalDetails: { path: string; preview: string; additions: number; deletions: number; totalLines: number; tool?: string } | undefined;
+  let pendingCommandProposal: { id: string; command: string; cwd: string; timeoutMs: number } | undefined;
+  const approvalWaiters = new Map<string, (result: { ok: boolean; output: string; status: string }) => void>();
+
+  const resolveApprovalWaiter = (requestId: string, result: { ok: boolean; output: string; status: string }) => {
+    const resolve = approvalWaiters.get(requestId);
+    if (!resolve) return;
+    approvalWaiters.delete(requestId);
+    resolve(result);
+  };
   
   const systemMessage = (m: "plan" | "build" = mode()): ChatMessage => ({
     role: "system",
@@ -447,6 +479,219 @@ function App() {
     )
   });
   const [history, setHistory] = createSignal<ChatMessage[]>([systemMessage()]);
+
+  const syncApprovalState = () => {
+    const current = approvalQueue.current();
+    setApprovalQueueSize(approvalQueue.size());
+    setApprovalCurrent(current);
+    if (current) {
+      const idx = Math.max(0, current.actions.indexOf(current.defaultAction));
+      setApprovalActionIndex(idx);
+      setApprovalFullscreen(false);
+    } else {
+      setApprovalActionIndex(0);
+      setApprovalFullscreen(false);
+      setApprovalResolving(false);
+    }
+  };
+
+  const clearApprovalQueue = (reason?: "cancelled" | "rejected" | "stale") => {
+    const removed = approvalQueue.clear();
+    const status = reason === "cancelled" ? "cancelled" : "rejected";
+    for (const req of removed) {
+      if (req.details.kind === "file-apply") {
+        if (workspaceTools) workspaceTools.rejectWrite(req.details.proposalId);
+        setProposalStatus(req.details.proposalId, status);
+        if (pendingProposalId === req.details.proposalId) pendingProposalId = undefined;
+      } else if (req.details.kind === "command") {
+        if (terminalTools) terminalTools.reject(req.details.proposalId);
+        if (pendingCommandId === req.details.proposalId) pendingCommandId = undefined;
+        resolveApprovalWaiter(req.id, {
+          ok: false,
+          output: reason === "cancelled" ? "Command approval cancelled." : "Command approval rejected.",
+          status,
+        });
+      }
+    }
+    pendingProposalDetails = undefined;
+    pendingCommandProposal = undefined;
+    syncApprovalState();
+    if (reason === "cancelled") setNotice("approval cancelled");
+    if (reason === "rejected") setNotice("request rejected");
+  };
+
+  const setProposalStatus = (proposalId: string, status: string) => {
+    setMessages((old) => old.map((m) => (m.meta?.id === proposalId ? { ...m, meta: { ...m.meta, status } } : m)));
+  };
+
+  const enqueueApplyRequest = (proposalId: string, details: { path: string; preview: string; additions: number; deletions: number; totalLines: number; tool?: string }) => {
+    pendingProposalId = proposalId;
+    pendingProposalDetails = details;
+    approvalQueue.enqueue(createApplyRequest(++approvalSeq, {
+      kind: "file-apply",
+      proposalId,
+      path: details.path,
+      preview: details.preview,
+      additions: details.additions,
+      deletions: details.deletions,
+      totalLines: details.totalLines,
+      tool: details.tool,
+    }));
+    syncApprovalState();
+  };
+
+  const enqueueCommandRequest = (
+    proposal: { id: string; command: string; cwd: string; timeoutMs: number },
+    options?: { waitForOutcome?: boolean },
+  ): Promise<{ ok: boolean; output: string; status: string }> | void => {
+    pendingCommandId = proposal.id;
+    pendingCommandProposal = proposal;
+    const request = createCommandPermissionRequest(++approvalSeq, {
+      kind: "command",
+      proposalId: proposal.id,
+      command: proposal.command,
+      cwd: proposal.cwd,
+      timeoutMs: proposal.timeoutMs,
+    });
+    const waitForOutcome = options?.waitForOutcome === true;
+    const outcomePromise = waitForOutcome
+      ? new Promise<{ ok: boolean; output: string; status: string }>((resolve) => {
+          approvalWaiters.set(request.id, resolve);
+        })
+      : undefined;
+
+    if (permissionStore.isAllowed(request.scopeKey)) {
+      // Auto-approved by a previously saved exact permission rule.
+      void resolveApprovalRequest(request, "allow-once", true);
+      return outcomePromise;
+    }
+    approvalQueue.enqueue(request);
+    syncApprovalState();
+    return outcomePromise;
+  };
+
+  async function resolveApprovalRequest(request: ApprovalRequest, action: ApprovalAction, auto = false): Promise<void> {
+    if (approvalResolving()) return;
+    // Stale request protection: only resolve if it's current in queue or an auto-allowed direct request.
+    const current = approvalQueue.current();
+    const isCurrent = current && current.id === request.id && current.seq === request.seq;
+    if (!auto && !isCurrent) return;
+
+    if (request.details.kind === "file-apply") {
+      if (!workspaceTools) return;
+      if (action === "reject") {
+        if (isCurrent) approvalQueue.resolveCurrent(request);
+        const result = workspaceTools.rejectWrite(request.details.proposalId);
+        setProposalStatus(request.details.proposalId, "rejected");
+        if (pendingProposalId === request.details.proposalId) pendingProposalId = undefined;
+        pendingProposalDetails = undefined;
+        lastApproval = { kind: "file", id: request.details.proposalId, status: "rejected" };
+        setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : result.error }]);
+        setNotice("proposal rejected");
+        syncApprovalState();
+        return;
+      }
+      if (action !== "apply") return;
+      setApprovalResolving(true);
+      try {
+        if (isCurrent) approvalQueue.resolveCurrent(request);
+        const result = await workspaceTools.applyWrite(request.details.proposalId);
+        if (result.ok) {
+          setProposalStatus(request.details.proposalId, auto ? "applied automatically" : "applied");
+          pendingProposalId = undefined;
+          pendingProposalDetails = undefined;
+          lastApproval = { kind: "file", id: request.details.proposalId, status: "applied", automatic: auto || undefined };
+          setMessages((old) => [...old, { role: "assistant", content: result.output }]);
+          setNotice(auto ? "approved change applied automatically" : "approved change applied");
+        } else {
+          // Failed apply: keep proposal pending for another attempt? existing behavior keeps it pending on failure paths in some cases.
+          // WorkspaceTools.applyWrite leaves proposal in map on failure; surface failure and requeue if still pending.
+          lastApproval = { kind: "file", id: request.details.proposalId, status: "failed" };
+          setMessages((old) => [...old, { role: "assistant", content: `Change not applied: ${result.error}` }]);
+          setProposalStatus(request.details.proposalId, "apply failed · awaiting approval");
+          // Re-enqueue same proposal if not already queued.
+          if (!approvalQueue.all().some((r) => r.details.kind === "file-apply" && r.details.proposalId === request.details.proposalId)) {
+            enqueueApplyRequest(request.details.proposalId, {
+              path: request.details.path,
+              preview: request.details.preview,
+              additions: request.details.additions,
+              deletions: request.details.deletions,
+              totalLines: request.details.totalLines,
+              tool: request.details.tool,
+            });
+          }
+          setNotice("approval failed");
+        }
+      } finally {
+        setApprovalResolving(false);
+        syncApprovalState();
+      }
+      return;
+    }
+
+    if (request.details.kind === "command") {
+      if (!terminalTools) {
+        resolveApprovalWaiter(request.id, { ok: false, output: "Terminal is unavailable.", status: "failed" });
+        return;
+      }
+      if (action === "reject") {
+        if (isCurrent) approvalQueue.resolveCurrent(request);
+        terminalTools.reject(request.details.proposalId);
+        if (pendingCommandId === request.details.proposalId) {
+          pendingCommandId = undefined;
+          pendingCommandProposal = undefined;
+        }
+        lastApproval = { kind: "command", id: request.details.proposalId, status: "rejected" };
+        const output = "Command rejected by user. Nothing was executed.";
+        setMessages((old) => [...old, { role: "assistant", content: "Pending command discarded. Nothing was executed." }]);
+        setNotice("command rejected");
+        resolveApprovalWaiter(request.id, { ok: false, output, status: "rejected" });
+        syncApprovalState();
+        return;
+      }
+      if (action === "allow-always") {
+        permissionStore.allow(request.scopeKey, "command");
+      }
+      if (action !== "allow-once" && action !== "allow-always") {
+        resolveApprovalWaiter(request.id, { ok: false, output: "Invalid approval action.", status: "failed" });
+        return;
+      }
+      setApprovalResolving(true);
+      try {
+        if (isCurrent) approvalQueue.resolveCurrent(request);
+        if (pendingCommandId === request.details.proposalId) {
+          pendingCommandId = undefined;
+          pendingCommandProposal = undefined;
+        }
+        setBusy(true);
+        setNotice(auto ? "running allowed command…" : "running approved command…");
+        const result = await terminalTools.runApproved(request.details.proposalId);
+        const status = result.ok ? "completed" : "failed";
+        lastApproval = { kind: "command", id: request.details.proposalId, status };
+        const output = result.ok ? result.output : `Command failed: ${result.error}`;
+        setMessages((old) => [...old, { role: "assistant", content: output }]);
+        setNotice(result.ok ? "command completed" : "command failed");
+        resolveApprovalWaiter(request.id, { ok: result.ok, output, status });
+      } finally {
+        setBusy(false);
+        setApprovalResolving(false);
+        syncApprovalState();
+      }
+    }
+  }
+
+  const confirmCurrentApproval = () => {
+    const current = approvalQueue.current();
+    if (!current) return;
+    const action = current.actions[approvalActionIndex()] ?? current.defaultAction;
+    void resolveApprovalRequest(current, action);
+  };
+
+  const rejectCurrentApproval = () => {
+    const current = approvalQueue.current();
+    if (!current) return;
+    void resolveApprovalRequest(current, "reject");
+  };
   const store = new SessionStore();
   const catMapper = new StateMapper();
   const [catPhase, setCatPhase] = createSignal(0);
@@ -742,6 +987,7 @@ const showTokenUsage = () => terminal().width >= 48;
   };
 
   const startNewSession = () => {
+    clearApprovalQueue("stale");
     setSession(null);
     setDraftSessionTitle("");
     catEvent({ type: "sessionStarted" });
@@ -751,6 +997,7 @@ const showTokenUsage = () => terminal().width >= 48;
     lastUserPrompt = "";
     pendingProposalId = undefined;
     pendingCommandId = undefined;
+    pendingProposalDetails = undefined;
     awaitingWritePath = undefined;
     modeTransition = undefined;
     lastApproval = undefined;
@@ -775,6 +1022,7 @@ const showTokenUsage = () => terminal().width >= 48;
       return;
     }
     const stored = store.getMessages(id);
+    clearApprovalQueue("stale");
     setSession(id);
     setDraftSessionTitle("");
     setHistory([systemMessage(), ...stored.filter((m) => m.role !== "system")]);
@@ -785,6 +1033,7 @@ const showTokenUsage = () => terminal().width >= 48;
     // Clear transient state on resume
     pendingProposalId = undefined;
     pendingCommandId = undefined;
+    pendingProposalDetails = undefined;
     awaitingWritePath = undefined;
     modeTransition = undefined;
     lastApproval = undefined;
@@ -1366,6 +1615,7 @@ const showTokenUsage = () => terminal().width >= 48;
 
     if (text === "/quit" || text === "/exit") {
       activeController?.abort();
+      clearApprovalQueue("stale");
       store.close();
       renderer.destroy();
       return;
@@ -1385,14 +1635,23 @@ const showTokenUsage = () => terminal().width >= 48;
         activeController.abort();
         setNotice("cancelling request…");
       } else {
+        if (approvalQueue.current()) clearApprovalQueue("cancelled");
         setNotice("nothing to cancel ♡");
       }
       return;
     }
     if (text === "/cancel-write") {
       awaitingWritePath = undefined;
+      const current = approvalQueue.current();
+      if (current?.kind === "apply") {
+        await resolveApprovalRequest(current, "reject");
+        return;
+      }
       if (pendingProposalId && workspaceTools) workspaceTools.rejectWrite(pendingProposalId);
+      if (pendingProposalId) setProposalStatus(pendingProposalId, "rejected");
       pendingProposalId = undefined;
+      pendingProposalDetails = undefined;
+      syncApprovalState();
       setNotice("pending file change discarded");
       setMessages((old) => [...old, { role: "assistant", content: "Okay ♡ no file was changed." }]);
       return;
@@ -1411,6 +1670,14 @@ const showTokenUsage = () => terminal().width >= 48;
         return;
       }
       pendingProposalId = result.proposal.id;
+      pendingProposalDetails = {
+        path: result.proposal.path,
+        preview: result.proposal.preview,
+        additions: result.proposal.additions ?? 0,
+        deletions: result.proposal.deletions ?? 0,
+        totalLines: result.proposal.totalLines ?? 0,
+        tool: "workspace_propose_write",
+      };
       setMessages((old) => [...old, {
         role: "assistant",
         content: result.proposal.preview,
@@ -1425,70 +1692,81 @@ const showTokenUsage = () => terminal().width >= 48;
           totalLines: String(result.proposal.totalLines ?? 0),
         },
       }]);
-      
-      // Auto-apply if enabled and in build mode
+
       if (autoApply === "auto" && mode() === "build") {
         const applyResult = await workspaceTools.applyWrite(result.proposal.id);
         if (applyResult.ok) {
           pendingProposalId = undefined;
+          pendingProposalDetails = undefined;
           lastApproval = { kind: "file", id: result.proposal.id, status: "applied", automatic: true };
-          setMessages((old) => old.map((m) => (m.meta?.id === result.proposal.id ? { ...m, meta: { ...m.meta, status: "applied automatically" } } : m)));
+          setProposalStatus(result.proposal.id, "applied automatically");
           setMessages((old) => [...old, { role: "assistant", content: `PROPOSAL AUTO-APPLIED — ${applyResult.output}` }]);
           setNotice("approved change applied automatically");
-        } else {
-          setMessages((old) => old.map((m) => (m.meta?.id === result.proposal.id ? { ...m, meta: { ...m.meta, status: "auto-apply failed · awaiting approval" } } : m)));
-          setMessages((old) => [...old, { role: "assistant", content: `Auto-apply failed: ${applyResult.error}. The proposal is still pending — use /apply to approve or /reject to discard.` }]);
-          setNotice("auto-apply failed");
+          return;
         }
+        setProposalStatus(result.proposal.id, "auto-apply failed · awaiting approval");
+        setMessages((old) => [...old, { role: "assistant", content: `Auto-apply failed: ${applyResult.error}. Review and approve or reject the pending change.` }]);
+        setNotice("auto-apply failed");
+        enqueueApplyRequest(result.proposal.id, pendingProposalDetails);
       } else {
         setNotice(`review proposal ${result.proposal.id}`);
+        enqueueApplyRequest(result.proposal.id, pendingProposalDetails);
       }
       return;
     }
     if (text === "/apply") {
+      const current = approvalQueue.current();
+      if (current?.kind === "apply") {
+        await resolveApprovalRequest(current, "apply");
+        return;
+      }
       if (!workspaceTools || !pendingProposalId) {
         setMessages((old) => [...old, { role: "assistant", content: "There is no pending file change to apply." }]);
         return;
       }
-      const proposalId = pendingProposalId;
-      const result = await workspaceTools.applyWrite(proposalId);
-      if (result.ok) {
-        setMessages((old) => old.map((m) => (m.meta?.id === proposalId ? { ...m, meta: { ...m.meta, status: "applied" } } : m)));
-      }
-      setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : `Change not applied: ${result.error}` }]);
-      if (result.ok) { pendingProposalId = undefined; lastApproval = { kind: "file", id: proposalId, status: "applied" }; }
-      else { lastApproval = { kind: "file", id: proposalId, status: "failed" }; }
-      setNotice(result.ok ? "approved change applied" : "approval failed");
+      // Fallback: pending proposal exists but not queued (defensive).
+      const details = pendingProposalDetails ?? { path: "", preview: "", additions: 0, deletions: 0, totalLines: 0 };
+      enqueueApplyRequest(pendingProposalId, details);
+      setNotice("review pending change");
       return;
     }
     if (text === "/reject") {
+      const current = approvalQueue.current();
+      if (current?.kind === "apply") {
+        await resolveApprovalRequest(current, "reject");
+        return;
+      }
       if (!workspaceTools || !pendingProposalId) {
         setMessages((old) => [...old, { role: "assistant", content: "There is no pending file change to reject." }]);
         return;
       }
-      const proposalId = pendingProposalId;
-      const result = workspaceTools.rejectWrite(proposalId);
-      setMessages((old) => old.map((m) => (m.meta?.id === proposalId ? { ...m, meta: { ...m.meta, status: "rejected" } } : m)));
+      const result = workspaceTools.rejectWrite(pendingProposalId);
+      setProposalStatus(pendingProposalId, "rejected");
+      lastApproval = { kind: "file", id: pendingProposalId, status: "rejected" };
       pendingProposalId = undefined;
-      lastApproval = { kind: "file", id: proposalId, status: "rejected" };
+      pendingProposalDetails = undefined;
       setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : result.error }]);
       setNotice("proposal rejected");
+      syncApprovalState();
       return;
     }
     if (text === "/approve") {
-      if (!workspaceTools || !pendingProposalId) {
-        setMessages((old) => [...old, { role: "assistant", content: "There is no pending file change to approve." }]);
+      const current = approvalQueue.current();
+      if (current?.kind === "apply") {
+        await resolveApprovalRequest(current, "apply");
         return;
       }
-      const proposalId = pendingProposalId;
-      const result = await workspaceTools.applyWrite(proposalId);
-      if (result.ok) {
-        setMessages((old) => old.map((m) => (m.meta?.id === proposalId ? { ...m, meta: { ...m.meta, status: "applied" } } : m)));
+      if (current?.kind === "permission" && current.details.kind === "command") {
+        await resolveApprovalRequest(current, "allow-once");
+        return;
       }
-      setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : `Change not applied: ${result.error}` }]);
-      if (result.ok) { pendingProposalId = undefined; lastApproval = { kind: "file", id: proposalId, status: "applied" }; }
-      else { lastApproval = { kind: "file", id: proposalId, status: "failed" }; }
-      setNotice(result.ok ? "approved change applied" : "approval failed");
+      if (!workspaceTools || !pendingProposalId) {
+        setMessages((old) => [...old, { role: "assistant", content: "There is no pending request to approve." }]);
+        return;
+      }
+      const details = pendingProposalDetails ?? { path: "", preview: "", additions: 0, deletions: 0, totalLines: 0 };
+      enqueueApplyRequest(pendingProposalId, details);
+      setNotice("review pending change");
       return;
     }
     if (text === "/autoapply" || text.startsWith("/autoapply ")) {
@@ -1585,8 +1863,8 @@ const showTokenUsage = () => terminal().width >= 48;
       return;
     }
     if (text.startsWith("/command ")) {
-      if (pendingCommandId) {
-        setMessages((old) => [...old, { role: "assistant", content: "A command is already awaiting approval. Type /run to execute it once or /reject-command to discard it first." }]);
+      if (pendingCommandId || approvalQueue.all().some((r) => r.details.kind === "command")) {
+        setMessages((old) => [...old, { role: "assistant", content: "A command is already awaiting approval. Resolve it before proposing another." }]);
         return;
       }
       if (!terminalTools) {
@@ -1599,33 +1877,41 @@ const showTokenUsage = () => terminal().width >= 48;
         return;
       }
       pendingCommandId = result.proposal.id;
-      setMessages((old) => [...old, { role: "assistant", content: `COMMAND PREVIEW — NOT EXECUTED\nID: ${result.proposal.id}\nCommand: ${result.proposal.command}\nWorking directory: ${result.proposal.cwd}\nTimeout: ${result.proposal.timeoutMs} ms\n\nInspect the exact command. Type /run to approve once, or /reject-command to discard.` }]);
+      setMessages((old) => [...old, { role: "assistant", content: `COMMAND PREVIEW — NOT EXECUTED\nID: ${result.proposal.id}\nCommand: ${result.proposal.command}\nWorking directory: ${result.proposal.cwd}\nTimeout: ${result.proposal.timeoutMs} ms\n\nInspect the exact command and approve or reject it.` }]);
+      enqueueCommandRequest(result.proposal);
       setNotice(`command ${result.proposal.id} awaiting approval`);
       return;
     }
     if (text === "/run") {
-      if (!terminalTools || !pendingCommandId) {
+      const current = approvalQueue.current();
+      if (current?.kind === "permission" && current.details.kind === "command") {
+        await resolveApprovalRequest(current, "allow-once");
+        return;
+      }
+      if (!terminalTools || !pendingCommandId || !pendingCommandProposal) {
         setMessages((old) => [...old, { role: "assistant", content: "No pending command. Preview one with /command first." }]);
         return;
       }
-      const id = pendingCommandId;
-      pendingCommandId = undefined;
-      setBusy(true);
-      setNotice("running approved command…");
-      const result = await terminalTools.runApproved(id);
-      setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : `Command failed: ${result.error}` }]);
-      lastApproval = { kind: "command", id, status: result.ok ? "completed" : "failed" };
-      setNotice(result.ok ? "command completed" : "command failed");
-      setBusy(false);
+      if (!approvalQueue.all().some((r) => r.details.kind === "command" && r.details.proposalId === pendingCommandId)) {
+        enqueueCommandRequest(pendingCommandProposal);
+      }
+      setNotice(`command ${pendingCommandId} awaiting approval`);
       return;
     }
     if (text === "/reject-command") {
+      const current = approvalQueue.current();
+      if (current?.kind === "permission" && current.details.kind === "command") {
+        await resolveApprovalRequest(current, "reject");
+        return;
+      }
       const id = pendingCommandId;
       if (id && terminalTools) terminalTools.reject(id);
       pendingCommandId = undefined;
+      pendingCommandProposal = undefined;
       lastApproval = { kind: "command", id: id ?? "", status: "rejected" };
       setMessages((old) => [...old, { role: "assistant", content: "Pending command discarded. Nothing was executed." }]);
       setNotice("command rejected");
+      syncApprovalState();
       return;
     }
     if (text === "/capabilities") {
@@ -1687,7 +1973,11 @@ const showTokenUsage = () => terminal().width >= 48;
     setMessages((old) => [...old, { role: "user", content: text }, { role: "assistant", content: "" }]);
     beginStreaming();
     persist({ role: "user", content: text });
-    const updatedHistory: ChatMessage[] = [systemMessage(), ...history().filter((message) => message.role !== "system"), { role: "user", content: text }];
+    const baseSystem = systemMessage();
+    const modeReminder: ChatMessage | null = modeTransition
+      ? { role: "system", content: `CURRENT MODE STATE: ${mode().toUpperCase()} (switched from ${modeTransition.from.toUpperCase()} to ${modeTransition.to.toUpperCase()}). Follow this current mode, not earlier assistant messages.` }
+      : null;
+    const updatedHistory: ChatMessage[] = [baseSystem, ...history().filter((message) => message.role !== "system"), { role: "user", content: text }];
     setHistory(updatedHistory);
     setBusy(true);
     setModeLocked(true);
@@ -1698,6 +1988,7 @@ const showTokenUsage = () => terminal().width >= 48;
 
     try {
       let workingHistory = [...updatedHistory];
+      if (modeReminder) workingHistory = [baseSystem, modeReminder, ...workingHistory.slice(1)];
       let answer = "";
       let completed = false;
       const budget = new AgentTurnBudget(agentLimits);
@@ -1775,7 +2066,7 @@ const showTokenUsage = () => terminal().width >= 48;
               call.function.name,
               call.function.arguments,
               workspaceTools,
-              (id) => { pendingProposalId = id; lastApproval = undefined; },
+              (id) => { pendingProposalId = id; lastApproval = undefined; pendingProposalDetails = undefined; },
               terminalTools,
               (id) => { pendingCommandId = id; lastApproval = undefined; },
               mode(),
@@ -1791,6 +2082,15 @@ const showTokenUsage = () => terminal().width >= 48;
           setMessages((old) => [...old, { role: "assistant", content: firstLine, kind: "result" }]);
           if (result.ok && ["workspace_propose_write", "workspace_propose_patch"].includes(call.function.name) && result.proposal) {
             const p = result.proposal;
+            const details = {
+              path: p.path,
+              preview: p.preview,
+              additions: p.additions ?? 0,
+              deletions: p.deletions ?? 0,
+              totalLines: p.totalLines ?? 0,
+              tool: call.function.name,
+            };
+            pendingProposalDetails = details;
             setMessages((old) => [...old, {
               role: "assistant",
               content: p.preview,
@@ -1805,26 +2105,41 @@ const showTokenUsage = () => terminal().width >= 48;
                 totalLines: String(p.totalLines ?? 0),
               },
             }]);
-            
-            // Auto-apply if enabled and in build mode
+
             if (autoApply === "auto" && mode() === "build" && workspaceTools) {
               const applyResult = await workspaceTools.applyWrite(p.id);
               if (applyResult.ok) {
                 pendingProposalId = undefined;
+                pendingProposalDetails = undefined;
                 lastApproval = { kind: "file", id: p.id, status: "applied", automatic: true };
-                // Update proposal card status
-                setMessages((old) => old.map((m) => (m.meta?.id === p.id ? { ...m, meta: { ...m.meta, status: "applied automatically" } } : m)));
-                // Replace tool output with auto-applied message
+                setProposalStatus(p.id, "applied automatically");
                 toolOutput = `PROPOSAL AUTO-APPLIED — ${applyResult.output}`;
               } else {
-                // Auto-apply failed, keep proposal pending
-                setMessages((old) => old.map((m) => (m.meta?.id === p.id ? { ...m, meta: { ...m.meta, status: "auto-apply failed · awaiting approval" } } : m)));
-                toolOutput = `Auto-apply failed: ${applyResult.error}. The proposal is still pending — use /apply to approve or /reject to discard.`;
+                setProposalStatus(p.id, "auto-apply failed · awaiting approval");
+                toolOutput = `Auto-apply failed: ${applyResult.error}. The proposal is still pending — review and approve or reject it.`;
+                enqueueApplyRequest(p.id, details);
               }
+            } else {
+              enqueueApplyRequest(p.id, details);
             }
           }
           if (result.ok && call.function.name === "terminal_propose") {
-            setMessages((old) => [...old, { role: "assistant", content: "· awaiting /run", kind: "approval" }]);
+            const match = toolOutput.match(/COMMAND PROPOSAL — NOT EXECUTED\nID: ([^\n]+)\nCommand: ([^\n]+)\nWorking directory: ([^\n]+)\nTimeout: (\d+) ms/);
+            if (match && terminalTools) {
+              setMessages((old) => [...old, { role: "assistant", content: "· awaiting approval", kind: "approval" }]);
+              const outcomePromise = enqueueCommandRequest(
+                { id: match[1], command: match[2], cwd: match[3], timeoutMs: Number(match[4]) || 120000 },
+                { waitForOutcome: true },
+              );
+              if (outcomePromise) {
+                const outcome = await outcomePromise;
+                toolOutput = outcome.output;
+              } else {
+                toolOutput = "Command approval was not available.";
+              }
+            } else {
+              setMessages((old) => [...old, { role: "assistant", content: "· awaiting approval", kind: "approval" }]);
+            }
           }
         }
         // Tool results go back to the model; the next round is reasoning.
@@ -1856,6 +2171,9 @@ const showTokenUsage = () => terminal().width >= 48;
     } catch (error) {
       cancelStreamingPreview();
       const aborted = activeController?.signal.aborted ?? false;
+      if (aborted) {
+        clearApprovalQueue("cancelled");
+      }
       const message = aborted ? "Request cancelled." : error instanceof Error ? error.message : "Unknown NVIDIA API error";
       if (aborted) {
         catEvent({ type: "cancelled" });
@@ -1969,6 +2287,33 @@ const showTokenUsage = () => terminal().width >= 48;
     const pos = cursorPos();
     const suggestions = commandSuggestions();
 
+    // Approval panel captures keyboard focus while active.
+    if (approvalQueue.current() && !connectOpen() && !sessionPickerOpen() && !modelPickerOpen() && !renameOpen()) {
+      const current = approvalQueue.current()!;
+      if (key.ctrl && !key.shift && key.name === "f") {
+        setApprovalFullscreen((v) => !v);
+        return;
+      }
+      if (key.name === "escape") {
+        if (!approvalResolving()) rejectCurrentApproval();
+        return;
+      }
+      if (key.name === "left") {
+        setApprovalActionIndex((i) => moveActionIndex(i, -1, current.actions.length));
+        return;
+      }
+      if (key.name === "right") {
+        setApprovalActionIndex((i) => moveActionIndex(i, 1, current.actions.length));
+        return;
+      }
+      if (key.name === "return" || key.name === "enter") {
+        if (!approvalResolving()) confirmCurrentApproval();
+        return;
+      }
+      // Prevent key events from leaking into chat input while approval is active.
+      return;
+    }
+
     // Handle connect popup keys first
     if (connectOpen()) {
       void handleConnectKey(key);
@@ -2043,38 +2388,22 @@ const showTokenUsage = () => terminal().width >= 48;
         }
         return;
       }
-      // Ctrl+Y - apply pending file proposal (when idle)
+      // Ctrl+Y - approve current pending request (apply file / allow command once)
       if (key.ctrl && !key.shift && key.name === "y") {
-        if (!busy() && !connectOpen() && !sessionPickerOpen() && !modelPickerOpen() && !renameOpen()) {
-          void (async () => {
-            if (pendingProposalId && workspaceTools) {
-              const proposalId = pendingProposalId;
-              const result = await workspaceTools.applyWrite(proposalId);
-              if (result.ok) {
-                pendingProposalId = undefined;
-                lastApproval = { kind: "file", id: proposalId, status: "applied" };
-                setMessages((old) => old.map((m) => (m.meta?.id === proposalId ? { ...m, meta: { ...m.meta, status: "applied" } } : m)));
-                setMessages((old) => [...old, { role: "assistant", content: result.output }]);
-                setNotice("approved change applied (Ctrl+Y)");
-              } else {
-                setMessages((old) => [...old, { role: "assistant", content: `Change not applied: ${result.error}` }]);
-                setNotice("approval failed");
-              }
-            } else if (pendingCommandId && terminalTools) {
-              // For terminal commands, Ctrl+Y does /run
-              const id = pendingCommandId;
-              pendingCommandId = undefined;
-              setBusy(true);
-              setNotice("running approved command…");
-              const result = await terminalTools.runApproved(id);
-              setMessages((old) => [...old, { role: "assistant", content: result.ok ? result.output : `Command failed: ${result.error}` }]);
-              lastApproval = { kind: "command", id, status: result.ok ? "completed" : "failed" };
-              setNotice(result.ok ? "command completed" : "command failed");
-              setBusy(false);
-            } else {
-              showToast("No pending proposal or command to approve");
-            }
-          })();
+        if (!connectOpen() && !sessionPickerOpen() && !modelPickerOpen() && !renameOpen() && !approvalResolving()) {
+          const current = approvalQueue.current();
+          if (current) {
+            if (current.kind === "apply") void resolveApprovalRequest(current, "apply");
+            else if (current.details.kind === "command") void resolveApprovalRequest(current, "allow-once");
+            return;
+          }
+          if (!busy() && pendingProposalId && workspaceTools && pendingProposalDetails) {
+            enqueueApplyRequest(pendingProposalId, pendingProposalDetails);
+            const req = approvalQueue.current();
+            if (req) void resolveApprovalRequest(req, "apply");
+            return;
+          }
+          showToast("No pending proposal or command to approve");
         }
         return;
       }
@@ -2488,7 +2817,7 @@ const showTokenUsage = () => terminal().width >= 48;
             }}
           </For>
           </scrollbox>
-          <Show when={commandSuggestions().length > 0 && !modelPickerOpen()}>
+          <Show when={commandSuggestions().length > 0 && !modelPickerOpen() && !approvalCurrent()}>
             <box backgroundColor={colors.bg} borderStyle="single" borderColor={colors.lavender} padding={1} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden" onMouseScroll={(e) => { e.stopPropagation(); }}>
               <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
                 <text fg={colors.lavender} wrapMode="none" width="100%" minWidth={0} truncate={true}>{commandPaletteHeader()}</text>
@@ -2535,7 +2864,7 @@ const showTokenUsage = () => terminal().width >= 48;
             </box>
           </Show>
           <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
-            <box backgroundColor="transparent" border={["top"]} borderColor={colors.rule} paddingLeft={1} paddingRight={1} paddingBottom={0} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
+            <box backgroundColor={colors.bg} border={["top"]} borderColor={colors.rule} paddingLeft={1} paddingRight={1} paddingBottom={0} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden">
               {inputLines() > 1 ? (
                 <scrollbox height={Math.min(inputLines(), MAX_INPUT_LINES)} minHeight={1} width="100%" minWidth={0} overflow="hidden" stickyScroll={true} stickyStart="bottom">
                   <text fg={colors.mint} wrapMode="char" width="100%">❯ {input().slice(0, cursorPos())}<span style={{ fg: colors.bg, bg: colors.mint }}>{cursorGlyph()}</span>{input().slice(cursorPos() + cursorAdvance())}</text>
@@ -2794,6 +3123,22 @@ const showTokenUsage = () => terminal().width >= 48;
         <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>Enter save · Esc cancel · Ctrl+Shift+V paste</text>
       </ModalFrame>
     </Show>
+
+      <Show when={approvalCurrent()}>
+        <ApprovalPanel
+          request={approvalCurrent()!}
+          selectedIndex={approvalActionIndex()}
+          fullscreen={approvalFullscreen()}
+          width={terminal().width}
+          height={terminal().height}
+          workspaceLabel={workspaceLabel()}
+          branch={workspaceBranch()}
+          queueSize={approvalQueueSize()}
+          busy={approvalResolving()}
+          onSelect={(index) => setApprovalActionIndex(index)}
+          onConfirm={() => { if (!approvalResolving()) confirmCurrentApproval(); }}
+        />
+      </Show>
 
       {/* Session picker modal */}
       <Show when={sessionPickerOpen()}>

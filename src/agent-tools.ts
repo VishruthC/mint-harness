@@ -83,7 +83,10 @@ export function buildSystemPrompt(workspaceReady: boolean, workspaceRoot?: strin
   const parts = [
     "You are MINT, a friendly and practical coding assistant running inside the MINT harness.",
     "Be concise, accurate, and transparent. Never reveal private chain-of-thought or provide an internal reasoning transcript; give the answer and a brief rationale when useful.",
-    `MODE: ${mode.toUpperCase()}.`,
+    `CURRENT EFFECTIVE MODE: ${mode.toUpperCase()}.`,
+    mode === "build"
+      ? "BUILD MODE IS ACTIVE NOW: you may create file-edit proposals and terminal command proposals when appropriate. Do not claim you are in Plan/read-only mode."
+      : "PLAN MODE IS ACTIVE NOW: read-only planning and inspection only. Do not create file-edit proposals or terminal command proposals.",
     modeText,
     modeTransition ? modeTransition : "",
     approvalState,

@@ -3,9 +3,8 @@
   "version": "0.1.0",
   "description": "A cute NVIDIA-powered terminal coding harness.",
   "type": "module",
-  "main": "src/index.tsx",
   "bin": {
-    "minth": "./src/index.tsx"
+    "minth": "./bin/mint.js"
   },
   "scripts": {
     "dev": "bun --conditions=development src/index.tsx",
@@ -14,7 +13,7 @@
     "first-chat": "bun scripts/first-chat.ts",
     "cat:assets": "bun scripts/cat-assets.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun test tests/agent-loop.test.ts tests/agent-tools.test.ts tests/cat-line-art.test.ts tests/cat-assets.test.ts tests/cat.test.ts tests/config.test.ts tests/first-chat.test.ts tests/install-minth.test.ts tests/nvidia.test.ts tests/storage.test.ts tests/terminal.test.ts tests/tools.test.ts tests/connect.test.ts tests/usage.test.ts tests/message-segments.test.ts tests/models.test.ts tests/ui-format.test.ts",
+    "test": "bun test tests/agent-loop.test.ts tests/agent-tools.test.ts tests/cat-line-art.test.ts tests/cat-assets.test.ts tests/cat.test.ts tests/config.test.ts tests/first-chat.test.ts tests/install-minth.test.ts tests/nvidia.test.ts tests/storage.test.ts tests/terminal.test.ts tests/tools.test.ts tests/connect.test.ts tests/usage.test.ts tests/message-segments.test.ts tests/models.test.ts tests/ui-format.test.ts tests/approval.test.ts tests/permission-store.test.ts",
     "check:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows.ps1"
   },
   "dependencies": {
@@ -32,7 +31,10 @@
     "src/",
     "bin/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "bunfig.toml",
+    "tsconfig.json",
+    ".env.example"
   ],
   "engines": {
     "bun": ">=1.3.14"
@@ -48,14 +50,14 @@
     "harness",
     "opentui"
   ],
-  "author": "",
+  "author": "VishruthC",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/mint-harness.git"
+    "url": "git+https://github.com/VishruthC/mint-harness.git"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/mint-harness/issues"
+    "url": "https://github.com/VishruthC/mint-harness/issues"
   },
-  "homepage": "https://github.com/yourusername/mint-harness#readme"
+  "homepage": "https://github.com/VishruthC/mint-harness#readme"
 }

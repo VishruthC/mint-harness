@@ -40,10 +40,11 @@ keeps working.
 ## 3. Transparency requirements
 
 Frames must be **RGBA PNGs with a real alpha channel**. Mint's shipped cat
-bakes its background to the harness color `#1E1E2E`. MINT's chrome (header,
-sidebar, chat, input) is transparent and inherits the terminal's own background,
-but a baked background inside a frame remains visible in the image box — that is
-expected, especially on light or custom terminal themes. If you supply frames
+bakes its background to the harness color `#1E1E2E`. The header, sidebar, and
+chat chrome is transparent and inherits the terminal's own background; the input
+box uses that same `#1E1E2E` so it visually matches the shipped frames. A baked
+background inside a frame remains visible in the image box — that is expected,
+especially on light or custom terminal themes. If you supply frames
 with real transparency they render as-is; use the pipeline's `--background none`
 option for new artwork, or `#1E1E2E` when you want the default harness color.
 Do not edit or rebuild the shipped frames just to change this.
