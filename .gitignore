@@ -10,6 +10,7 @@ cap*.txt
 capdbg*.*
 capfix*.*
 caprepo*.*
+smoke*.txt
 .DS_Store
 test-diff.tsx
 test.tsx
