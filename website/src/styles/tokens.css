@@ -7,26 +7,26 @@
 }
 
 :root {
-  /* Night paper */
-  --paper: #0a0b10;
-  --paper-deep: #06070a;
-  --paper-light: #12141c;
-  --ink: #f4f1ea;
-  --ink-soft: #d7d3ca;
-  --muted: #94909f;
-  --rule: rgba(205, 214, 244, 0.13);
-  --rule-strong: rgba(205, 214, 244, 0.26);
+  /* Paper */
+  --paper: #f3eee5;
+  --paper-deep: #eae2d5;
+  --paper-light: #faf7f0;
+  --ink: #1a1822;
+  --ink-soft: #2a2733;
+  --muted: #6e6878;
+  --rule: #d8d0c4;
+  --rule-strong: #bdb3a5;
 
-  /* Accents on night paper */
-  --mint: #a6e3a1;
-  --mint-deep: #7bda91;
-  --mint-wash: rgba(166, 227, 161, 0.1);
-  --pink: #f5c2e7;
-  --pink-wash: rgba(245, 194, 231, 0.1);
-  --lavender: #cba6f7;
-  --peach: #fab387;
-  --red: #f38ba8;
-  --red-wash: rgba(243, 139, 168, 0.1);
+  /* Accents on paper */
+  --mint: #2b7554;
+  --mint-deep: #1f5c42;
+  --mint-wash: #dcebdd;
+  --pink: #c9649a;
+  --pink-wash: #f3dce7;
+  --lavender: #6f5fa8;
+  --peach: #b96532;
+  --red: #b23a54;
+  --red-wash: #f0d7dc;
 
   /* Catppuccin Mocha exhibits */
   --terminal: #1e1e2e;
@@ -48,7 +48,6 @@
 
   /* Type */
   --font-serif: "Newsreader Variable", Newsreader, Georgia, "Times New Roman", serif;
-  --font-sans: "Instrument Sans Variable", "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Victor Mono", ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --font-terminal: ui-monospace, "Cascadia Mono", "Consolas", "Menlo", "Monaco", "Liberation Mono", monospace;
   --font-pixel: "Departure Mono", "Victor Mono", monospace;
