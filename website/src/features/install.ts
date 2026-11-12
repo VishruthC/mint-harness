@@ -5,7 +5,7 @@ export function initInstall(): void {
   const tabs = $$<HTMLButtonElement>("[data-install-tab]");
   const panels = $$<HTMLElement>("[data-install-panel]");
   const copyButton = $<HTMLButtonElement>("[data-copy-install]");
-  if (!tabs.length) return;
+  if (!panels.length) return;
 
   const activate = (name: string, focus = false): void => {
     for (const tab of tabs) {
@@ -98,5 +98,14 @@ export function initInstall(): void {
     else showToast("Copy failed — select the command block manually.");
   });
 
-  activate(tabs.find((tab) => tab.classList.contains("is-active"))?.dataset.installTab ?? "powershell");
+  if (tabs.length) {
+    activate(tabs.find((tab) => tab.classList.contains("is-active"))?.dataset.installTab ?? "powershell");
+    return;
+  }
+
+  const fallback = panels[0];
+  if (fallback) {
+    fallback.classList.add("is-active");
+    fallback.hidden = false;
+  }
 }

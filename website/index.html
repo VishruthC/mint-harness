@@ -1032,84 +1032,37 @@ output capped at 24,000 characters</code></pre>
               <p class="chapter-number" data-reveal>07 / INSTALL</p>
               <h2 data-reveal>Take it <em>for a walk.</em></h2>
               <p class="chapter-kicker" data-reveal>
-                Bun 1.3.14+, an NVIDIA API key, and a terminal that can hold a cat.
+                One global install, an NVIDIA API key, and a terminal that can hold a cat.
               </p>
             </header>
 
             <ul class="requirements" data-reveal>
-              <li><span>01</span> Bun 1.3.14 or newer</li>
-              <li><span>02</span> An NVIDIA API key with access to a hosted model</li>
-              <li><span>03</span> Linux x64, macOS, or Windows x64 / WSL</li>
+              <li><span>01</span> Node.js and npm to install globally</li>
+              <li><span>02</span> Bun 1.3.14 or newer on your PATH</li>
+              <li><span>03</span> An NVIDIA API key with access to a hosted model</li>
+              <li><span>04</span> Linux x64, macOS, or Windows x64 / WSL</li>
             </ul>
 
             <p class="install-note" data-reveal>
-              The last command creates <code>initial chat</code> and launches MINT there. Later, run
-              <code>minth</code> from any directory. Your key stays in <code>.env</code>; MINT never
-              writes it to chat history, logs, or SQLite.
+              Run <code>minth</code> inside the project you want MINT to work in. Configure your key
+              with <code>/connect</code> or a local <code>.env</code>. Session history stays in
+              <code>~/.mint/mint.sqlite</code> (or <code>MINT_DATA_DIR</code>).
             </p>
           </div>
 
           <div class="install-card" data-install-card data-reveal>
-            <div class="install-tabs" role="tablist" aria-label="Install shell">
-              <button
-                class="install-tab is-active"
-                type="button"
-                role="tab"
-                aria-selected="true"
-                aria-controls="install-powershell"
-                id="tab-powershell"
-                data-install-tab="powershell"
-              >
-                PowerShell
-              </button>
-              <button
-                class="install-tab"
-                type="button"
-                role="tab"
-                aria-selected="false"
-                aria-controls="install-bash"
-                id="tab-bash"
-                data-install-tab="bash"
-              >
-                Bash
-              </button>
-            </div>
-
             <div
               class="install-panel is-active"
-              role="tabpanel"
-              id="install-powershell"
-              aria-labelledby="tab-powershell"
-              data-install-panel="powershell"
+              data-install-panel="npm"
             >
-              <pre><code>git clone https://github.com/VishruthC/mint-harness.git
-cd mint-harness
-bun install
-Copy-Item .env.example .env
-notepad .env
-bun run install:minth
-bun run first-chat</code></pre>
-            </div>
+              <pre><code>npm install -g mint-harness
 
-            <div
-              class="install-panel"
-              role="tabpanel"
-              id="install-bash"
-              aria-labelledby="tab-bash"
-              data-install-panel="bash"
-              hidden
-            >
-              <pre><code>git clone https://github.com/VishruthC/mint-harness.git
-cd mint-harness
-bun install
-cp .env.example .env
-${EDITOR:-nano} .env
-bun run install:minth
-bun run first-chat</code></pre>
+cd path/to/your-project
+minth</code></pre>
             </div>
 
             <div class="install-card-foot">
-              <span>set <code>NVIDIA_API_KEY</code> in .env · launch anywhere with <code>minth</code></span>
+              <span>install once · run <code>minth</code> in any project · configure with <code>/connect</code></span>
               <button class="copy-button" type="button" data-copy-install>copy</button>
             </div>
 
@@ -1134,7 +1087,7 @@ bun run first-chat</code></pre>
               A small harness with sharp little claws. Built with Bun, OpenTUI, SolidJS, and
               NVIDIA NIM. It reads carefully, asks first, and purrs.
             </p>
-            <p class="footer-status"><span class="status-dot"></span> v0.1.0 · in development</p>
+            <p class="footer-status"><span class="status-dot"></span> v0.1.1 · in development</p>
           </div>
 
           <nav class="footer-nav" aria-label="Project links">
@@ -1227,7 +1180,7 @@ bun run first-chat</code></pre>
             <span class="index-text"><strong>Limits</strong><em>A leash, not a sandbox</em></span>
             <span class="index-arrow">→</span>
           </a>
-          <a href="#install" data-index-item data-keywords="install bun nvidia api key clone run">
+          <a href="#install" data-index-item data-keywords="install npm bun nvidia api key minth">
             <span class="index-num">07</span>
             <span class="index-text"><strong>Install</strong><em>Take it for a walk</em></span>
             <span class="index-arrow">→</span>
