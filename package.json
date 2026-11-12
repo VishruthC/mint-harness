@@ -4,16 +4,18 @@
   "description": "A cute NVIDIA-powered terminal coding harness.",
   "type": "module",
   "bin": {
-    "minth": "./bin/mint.js"
+    "minth": "bin/mint.js"
   },
   "scripts": {
     "dev": "bun --conditions=development src/index.tsx",
     "start": "bun src/index.tsx",
+    "build": "bun scripts/build.ts",
+    "prepack": "bun run build",
     "install:minth": "bun scripts/install-minth.ts",
     "first-chat": "bun scripts/first-chat.ts",
     "cat:assets": "bun scripts/cat-assets.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun test tests/agent-loop.test.ts tests/agent-tools.test.ts tests/cat-line-art.test.ts tests/cat-assets.test.ts tests/cat.test.ts tests/config.test.ts tests/first-chat.test.ts tests/install-minth.test.ts tests/nvidia.test.ts tests/storage.test.ts tests/terminal.test.ts tests/tools.test.ts tests/connect.test.ts tests/usage.test.ts tests/message-segments.test.ts tests/models.test.ts tests/ui-format.test.ts tests/approval.test.ts tests/permission-store.test.ts",
+    "test": "bun test tests/agent-loop.test.ts tests/agent-tools.test.ts tests/cat-assets.test.ts tests/cat.test.ts tests/config.test.ts tests/first-chat.test.ts tests/install-minth.test.ts tests/nvidia.test.ts tests/storage.test.ts tests/terminal.test.ts tests/tools.test.ts tests/connect.test.ts tests/usage.test.ts tests/message-segments.test.ts tests/models.test.ts tests/ui-format.test.ts tests/approval.test.ts tests/permission-store.test.ts",
     "check:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows.ps1"
   },
   "dependencies": {
@@ -28,6 +30,7 @@
     "typescript": "^5.9.3"
   },
   "files": [
+    "dist/",
     "src/",
     "bin/",
     "README.md",

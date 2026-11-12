@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync, copyFileSync, unli
 import { z } from "zod";
 import { DEFAULT_AGENT_LOOP_LIMITS } from "./agent-loop";
 import type { CatConfig } from "./cat/types";
+import { envFilePath } from "./paths";
 
 const EnvSchema = z.object({
   NVIDIA_API_KEY: z.string().trim().min(1, "NVIDIA_API_KEY is missing"),
@@ -39,7 +40,7 @@ const truthy = (value: unknown) => {
   return false;
 };
 
-function readDotEnv(path = ".env"): Record<string, string> {
+function readDotEnv(path = envFilePath()): Record<string, string> {
   if (!existsSync(path)) return {};
   const values: Record<string, string> = {};
   for (const rawLine of readFileSync(path, "utf8").split(/\r?\n/)) {
@@ -155,7 +156,7 @@ function writeDotEnvAtomic(
   }
 }
 
-export function writeDotEnv(config: MintConfig, path = ".env"): void {
+export function writeDotEnv(config: MintConfig, path = envFilePath()): void {
   writeDotEnvAtomic(path, (existingLines) => {
     const otherLines = existingLines.filter((line) => {
       const trimmed = line.trim();
@@ -187,7 +188,7 @@ export function writeDotEnv(config: MintConfig, path = ".env"): void {
   });
 }
 
-export function updateDotEnvModel(model: string, path = ".env"): void {
+export function updateDotEnvModel(model: string, path = envFilePath()): void {
   if (!model || model.includes("\n") || model.includes("\r")) {
     throw new Error("Invalid model ID");
   }
@@ -202,7 +203,7 @@ export function updateDotEnvModel(model: string, path = ".env"): void {
   });
 }
 
-export function updateDotEnvAutoApply(mode: "manual" | "auto", path = ".env"): void {
+export function updateDotEnvAutoApply(mode: "manual" | "auto", path = envFilePath()): void {
   if (!["manual", "auto"].includes(mode)) throw new Error("Invalid auto-apply mode");
   writeDotEnvAtomic(path, (existingLines) => {
     const otherLines = existingLines.filter((line) => {

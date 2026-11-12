@@ -2,7 +2,7 @@
 
 A cute, terminal-native coding harness inspired by OpenCode's architecture, independently implemented and **NVIDIA API-only**.
 
-> Interactive OpenTUI chat with NVIDIA NIM streaming, SQLite sessions, model-callable workspace tools, targeted patch proposals, project-context discovery, approval-gated restricted terminal commands, repeated-tool-loop safeguards, and a line-art cat mascot. Web browsing is not implemented.
+> Interactive OpenTUI chat with NVIDIA NIM streaming, SQLite sessions, model-callable workspace tools, targeted patch proposals, project-context discovery, approval-gated restricted terminal commands, repeated-tool-loop safeguards, and an animated cat companion. Web browsing is not implemented.
 
 ## Requirements
 
@@ -25,7 +25,7 @@ minth
 
 MINT uses the directory you launch it from as the workspace and only shows sessions created in that exact directory. Session data is stored in `~/.mint/mint.sqlite` by default (set `MINT_DATA_DIR` to override).
 
-> **Note:** MINT ships as TypeScript source and is executed with Bun. Make sure `bun` is installed and available on your `PATH`. Global npm installs place the package under your npm prefix; the launcher runs Bun from the package root and preserves your launch directory as the workspace.
+> **Note:** npm installs ship a prebuilt Bun bundle (`dist/index.js`) alongside the source and cat assets, so JSX/Solid transforms are already applied. Make sure `bun` is installed and available on your `PATH`. The launcher runs from the package root for dependency resolution but preserves your launch directory as the workspace and `.env` location.
 
 ## Configure
 

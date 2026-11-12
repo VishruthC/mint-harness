@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { chmodSync, mkdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { invocationCwd } from "./paths";
 import type { TokenUsage } from "./usage";
 
 export type StoredMessage = {
@@ -93,7 +94,7 @@ export class SessionStore {
     // Attach them once to the current workspace so they are not lost.
     const userVersion = (this.db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
     if (userVersion < 1) {
-      const legacyWorkspace = normalizeWorkspace(process.env.MINT_WORKSPACE || process.cwd());
+      const legacyWorkspace = normalizeWorkspace(process.env.MINT_WORKSPACE || invocationCwd());
       this.db.query("UPDATE sessions SET workspace = ? WHERE workspace IS NULL").run(legacyWorkspace);
       this.db.exec("PRAGMA user_version = 1");
     }

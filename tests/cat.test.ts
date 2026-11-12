@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseManifest, loadPack, effectiveAnimation, framePath } from "../src/cat/manifest";
+import { parseManifest, loadPack, effectiveAnimation, framePath, assetsRoot, packDir, assetsRootCandidates, chooseAssetsRoot } from "../src/cat/manifest";
+import { NativeImage } from "@opentui/core";
 import {
   animationFps,
   frameAt,
@@ -122,6 +123,24 @@ describe("cat manifest", () => {
   test("framePath rejects traversal outside the pack", () => {
     expect(framePath("default", "../outside.png")).toBe("");
     expect(framePath("default", "/absolute.png")).toBe("");
+  });
+
+  test("finds shipped assets from both source and bundled layouts", () => {
+    const root = mkdtempSync(join(tmpdir(), "mint-cat-root-"));
+    try {
+      const sourceCat = join(root, "src", "cat");
+      const assets = join(sourceCat, "assets");
+      const dist = join(root, "dist");
+      mkdirSync(assets, { recursive: true });
+      mkdirSync(dist, { recursive: true });
+
+      expect(chooseAssetsRoot(assetsRootCandidates(sourceCat))).toBe(assets);
+      expect(chooseAssetsRoot(assetsRootCandidates(dist))).toBe(assets);
+      expect(chooseAssetsRoot([join(root, "missing"), assets])).toBe(assets);
+      expect(chooseAssetsRoot([join(root, "missing")])).toBe(join(root, "missing"));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -536,9 +555,9 @@ describe("cat loop regression", () => {
 
   test("a loop wraps from its final frame back to frame zero", () => {
     const animation = looping("talk");
-    expect(animation.frames).toHaveLength(4);
+    expect(animation.frames).toHaveLength(2);
     const cycleMs = (animation.frames.length * 1000) / animation.fps;
-    expect(frameAt(animation, 0, cycleMs - 1, false).index).toBe(3);
+    expect(frameAt(animation, 0, cycleMs - 1, false).index).toBe(1);
     expect(frameAt(animation, 0, cycleMs, false).index).toBe(0);
     expect(frameAt(animation, 0, cycleMs + 1, false).index).toBe(0);
     expect(frameAt(animation, 0, cycleMs + 250, false).index).toBe(1);
@@ -566,9 +585,9 @@ describe("cat loop regression", () => {
       expect(distinct(seen)).toEqual(Array.from({ length: count }, (_, index) => index));
     }
 
-    // The shipped pack itself uses 2-frame and 4-frame states.
+    // The shipped pack currently uses 2-frame animations across all states.
     expect(looping("idle").frames).toHaveLength(2);
-    expect(looping("talk").frames).toHaveLength(4);
+    expect(looping("talk").frames).toHaveLength(2);
   });
 
   test("each state uses its own configured FPS", () => {
@@ -577,8 +596,10 @@ describe("cat loop regression", () => {
     expect(think.fps).toBe(1.5);
     expect(talk.fps).toBe(4);
     expect(frameAt(think, 0, 667, false).index).toBe(1);
-    expect(frameAt(talk, 0, 500, false).index).toBe(2);
-    expect(frameAt(talk, 0, 750, false).index).toBe(3);
+    // talk: 4 fps, 2 frames -> 250ms per frame, wraps every 500ms
+    expect(frameAt(talk, 0, 250, false).index).toBe(1);
+    expect(frameAt(talk, 0, 500, false).index).toBe(0);
+    expect(frameAt(talk, 0, 750, false).index).toBe(1);
     expect(frameAt(talk, 0, 1000, false).index).toBe(0);
 
     // Overrides stay scoped to the documented states.
@@ -626,8 +647,8 @@ describe("cat loop regression", () => {
       expect(activity.state).toBe("talk");
       talkFrames.push(frameAt(talk, activity.sinceMs, now, false).index);
     }
-    expect(distinct(talkFrames)).toEqual([0, 1, 2, 3]);
-    expect(hasWrap(talkFrames, 4)).toBe(true);
+    expect(distinct(talkFrames)).toEqual([0, 1]);
+    expect(hasWrap(talkFrames, 2)).toBe(true);
 
     const reading = mapper.handle({ type: "toolStarted", toolName: "workspace_read" }, 2500);
     expect(reading.state).toBe("read");
@@ -647,7 +668,7 @@ describe("cat loop regression", () => {
 
     const talking = mapper.handle({ type: "responseStreaming" }, 0);
     expect(talking.state).toBe("talk");
-    expect(frameAt(talk, talking.sinceMs, 750, false).index).toBe(3);
+    expect(frameAt(talk, talking.sinceMs, 750, false).index).toBe(1);
 
     const celebrating = mapper.handle({ type: "operationCompleted" }, 500);
     expect(celebrating.state).toBe("success");
@@ -660,16 +681,16 @@ describe("cat loop regression", () => {
     expect(restored.state).toBe("talk");
     expect(restored.sinceMs).toBe(0);
     // The talk loop resumes where it would have been, not frozen on frame 1.
-    expect(frameAt(talk, restored.sinceMs, 2700, false).index).toBe(2);
-    expect(frameAt(talk, restored.sinceMs, 2750, false).index).toBe(3);
+    expect(frameAt(talk, restored.sinceMs, 2700, false).index).toBe(0);
+    expect(frameAt(talk, restored.sinceMs, 2750, false).index).toBe(1);
     expect(frameAt(talk, restored.sinceMs, 3000, false).index).toBe(0);
 
     const resumed: number[] = [];
     for (let now = 2700; now <= 3800; now += 50) {
       resumed.push(frameAt(talk, restored.sinceMs, now, false).index);
     }
-    expect([...new Set(resumed)].sort((a, b) => a - b)).toEqual([0, 1, 2, 3]);
-    expect(hasWrap(resumed, 4)).toBe(true);
+    expect([...new Set(resumed)].sort((a, b) => a - b)).toEqual([0, 1]);
+    expect(hasWrap(resumed, 2)).toBe(true);
   });
 
   test("repeated events neither restart nor stall a loop", () => {
@@ -736,5 +757,69 @@ describe("cat loop regression", () => {
     clock.dispose();
     expect(scheduled).toBe(2);
     expect(cleared).toBe(2);
+  });
+});
+
+describe("default mascot pack runtime resolution", () => {
+  const STATES: CatState[] = ["hi", "idle", "think", "talk", "read", "write", "tool", "success", "failure"];
+
+  test("loads manifest, resolves and decodes all state frames independently of cwd", async () => {
+    const prevAssets = process.env.MINT_CAT_ASSETS;
+    delete process.env.MINT_CAT_ASSETS;
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(tmpdir());
+      const pack = loadPack("default");
+      expect(pack.ok).toBe(true);
+      expect(pack.error).toBeUndefined();
+      expect(Object.keys(pack.manifest.animations).sort()).toEqual(STATES.slice().sort());
+
+      const idle = effectiveAnimation(pack.manifest, "idle");
+      expect(idle.frames).toEqual(["idle/frame-01.png", "idle/frame-02.png"]);
+      for (const frame of idle.frames) {
+        const resolved = framePath("default", frame);
+        expect(resolved).not.toBe("");
+        expect(existsSync(resolved)).toBe(true);
+      }
+
+      const uniqueResolved = new Set<string>();
+      for (const state of STATES) {
+        const animation = effectiveAnimation(pack.manifest, state);
+        expect(animation.frames.length).toBeGreaterThan(0);
+        for (const frame of animation.frames) {
+          const resolved = framePath("default", frame);
+          expect(resolved).not.toBe("");
+          expect(existsSync(resolved)).toBe(true);
+          uniqueResolved.add(resolved);
+        }
+      }
+
+      expect([...uniqueResolved].sort()).toEqual(
+        [
+          join(packDir("default"), "hi", "frame-01.png"),
+          join(packDir("default"), "hi", "frame-02.png"),
+          join(packDir("default"), "idle", "frame-01.png"),
+          join(packDir("default"), "idle", "frame-02.png"),
+          join(packDir("default"), "read", "frame-01.png"),
+          join(packDir("default"), "read", "frame-02.png"),
+          join(packDir("default"), "think", "frame-01.png"),
+          join(packDir("default"), "think", "frame-02.png"),
+        ].sort(),
+      );
+
+      for (const resolved of uniqueResolved) {
+        const bytes = new Uint8Array(readFileSync(resolved));
+        const image = NativeImage.decode(bytes);
+        expect(image.width).toBeGreaterThan(0);
+        expect(image.height).toBeGreaterThan(0);
+        image.dispose();
+      }
+
+      expect(assetsRoot()).not.toContain(process.cwd());
+    } finally {
+      process.chdir(originalCwd);
+      if (prevAssets === undefined) delete process.env.MINT_CAT_ASSETS;
+      else process.env.MINT_CAT_ASSETS = prevAssets;
+    }
   });
 });

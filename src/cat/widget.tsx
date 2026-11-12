@@ -4,8 +4,8 @@
  * Renders the active asset-pack frame as a real PNG via OpenTUI's `<image>`
  * element (Kitty/Sixel/blocks negotiated by OpenTUI), above a full-width
  * divider, paws resting on the divider. Frames are decoded once and cached;
- * swapping states never re-reads disk. Falls back to the existing pixel
- * renderer when image rendering is disabled or unsupported.
+ * swapping states never re-reads disk. If the original mascot assets cannot be
+ * loaded, a clear diagnostic is shown instead of unrelated fallback artwork.
  *
  * State changes use a clean frame-boundary transition: the outgoing frame is
  * held for `transitionMs`, then the incoming state starts on its first frame.
@@ -21,7 +21,6 @@ import { decideRenderer } from "./terminal-detection.ts";
 import type { CatActivity } from "./state-mapper.ts";
 import type { CatRendererName, CatAnimation, CatState } from "./types.ts";
 import { CAT_STATES } from "./types.ts";
-import { renderCatPixels, type CatCell, type CatPalette } from "../cat-line-art.ts";
 
 export interface CatCompanionProps {
   width: number;
@@ -44,23 +43,12 @@ export interface CatCompanionProps {
   oneShotSpeed?: number;
   colors: {
     divider: string;
-    ascii: CatPalette;
+    /** Optional: retained for compatibility; image mode does not use it. */
+    ascii?: unknown;
   };
 }
 
 type LoadedImage = { path: string; image: NativeImage };
-
-type Span = { text: string; fg: string; bg: string };
-
-function toSpans(cells: CatCell[]): Span[] {
-  const spans: Span[] = [];
-  for (const cell of cells) {
-    const last = spans[spans.length - 1];
-    if (last && last.fg === cell.fg && last.bg === cell.bg) last.text += cell.ch;
-    else spans.push({ text: cell.ch, fg: cell.fg, bg: cell.bg });
-  }
-  return spans;
-}
 
 interface DisplayState {
   state: CatState;
@@ -92,17 +80,6 @@ interface Selection {
 }
 
 const EMPTY_ANIMATION: CatAnimation = { frames: [], fps: 2, loop: true };
-const FALLBACK_STATE: Record<CatState, "idle" | "thinking" | "working" | "success"> = {
-  hi: "success",
-  idle: "idle",
-  think: "thinking",
-  talk: "working",
-  read: "working",
-  write: "working",
-  tool: "working",
-  success: "success",
-  failure: "idle",
-};
 
 function buildPlayback(pack: LoadedPack | null, name: string, props: CatCompanionProps): Playback {
   const result = {} as Playback;
@@ -337,18 +314,19 @@ export function CatCompanion(props: CatCompanionProps) {
   const imageX = createMemo(() => Math.max(0, Math.floor((props.width - imageWidth()) / 2)));
   const divider = createMemo(() => "─".repeat(Math.max(0, props.width)));
 
-  // Fallback whenever the image path cannot run (renderer=ascii, missing
-  // pack, or no frames), so the cat never breaks the layout.
-  const fallback = createMemo(() => {
+  // If mascot image assets cannot be loaded/rendered, show a clear diagnostic
+  // instead of unrelated fallback artwork.
+  const diagnostic = createMemo(() => {
     if (imageAvailable()) return null;
-    return renderCatPixels({
-      width: props.width,
-      height: props.height,
-      state: FALLBACK_STATE[props.state],
-      // A disabled animation freezes the fallback too, not just image frames.
-      phase: props.animation ? props.phase : 0,
-      colors: props.colors.ascii,
-    }).rows;
+    if (!props.enabled) return null;
+    const pack = packData();
+    if (pack && !pack.ok) {
+      return `Mascot assets unavailable: ${pack.error ?? `invalid pack "${props.pack}"`}`;
+    }
+    if (!selection().path) {
+      return `Mascot assets unavailable: no image frames for state "${selection().state}" in pack "${props.pack}"`;
+    }
+    return `Mascot assets unavailable: renderer "${props.renderer}" cannot display image assets`;
   });
 
   return (
@@ -357,18 +335,14 @@ export function CatCompanion(props: CatCompanionProps) {
         <Show
           when={imageAvailable()}
           fallback={
-            <>
-              {(fallback() ?? []).map((row) => {
-                if (row.length && row.every((cell) => cell.ch === "─")) {
-                  return <text fg={props.colors.divider} wrapMode="none" width="100%" minWidth={0} truncate={true}>{"─".repeat(row.length)}</text>;
-                }
-                return (
-                  <text wrapMode="none" width="100%" minWidth={0} truncate={true}>
-                    {toSpans(row).map((span) => <span style={{ fg: span.fg, bg: span.bg }}>{span.text}</span>)}
-                  </text>
-                );
-              })}
-            </>
+            <box flexDirection="column" width="100%" minWidth={0} paddingTop={1} paddingBottom={0}>
+              <text fg={props.colors.divider} wrapMode="word" width="100%" minWidth={0}>
+                {diagnostic() ?? "Mascot assets unavailable"}
+              </text>
+              <text fg={props.colors.divider} wrapMode="none" width="100%" minWidth={0} truncate={true}>
+                {divider()}
+              </text>
+            </box>
           }
         >
           <box flexDirection="row" width="100%" minWidth={0} overflow="hidden">

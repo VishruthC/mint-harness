@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, readdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { buildUnifiedDiff } from "./diff";
+import { invocationCwd } from "./paths";
 
 export type ToolResult = { ok: true; output: string } | { ok: false; error: string };
 export type WorkspaceEntry = { name: string; type: "file" | "directory"; size?: number };
@@ -60,7 +61,7 @@ export class WorkspaceTools {
     this.root = root;
   }
 
-  static async create(root = process.env.MINT_WORKSPACE || process.cwd()): Promise<WorkspaceTools> {
+  static async create(root = process.env.MINT_WORKSPACE || invocationCwd()): Promise<WorkspaceTools> {
     const canonicalRoot = await realpath(resolve(root));
     const info = await stat(canonicalRoot);
     if (!info.isDirectory()) throw new Error("MINT workspace must be a directory.");

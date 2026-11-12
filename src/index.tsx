@@ -3,6 +3,7 @@
 import { render, useKeyboard, useRenderer, useTerminalDimensions, usePaste, useSelectionHandler } from "@opentui/solid";
 import { For, Show, createMemo, createSignal, createEffect, onCleanup, onMount, JSX } from "solid-js";
 import { loadConfig, writeDotEnv, updateDotEnvModel, updateDotEnvAutoApply, type MintConfig } from "./config";
+import { invocationCwd } from "./paths";
 import { AgentTurnBudget, formatAgentLimits, formatLimitMessage, RepeatedCallGuard } from "./agent-loop";
 import { NvidiaClient, type ChatMessage, type NvidiaModel, type ToolCall } from "./nvidia";
 import { buildSystemPrompt, executeModelTool, getCapabilities, getModelTools } from "./agent-tools";
@@ -440,7 +441,7 @@ function App() {
   const [notice, setNotice] = createSignal("Connecting to NVIDIA…");
   let workspaceTools: WorkspaceTools | undefined;
   let terminalTools: ApprovedTerminal | undefined;
-  const [workspacePath, setWorkspacePath] = createSignal(resolve(process.env.MINT_WORKSPACE || process.cwd()));
+  const [workspacePath, setWorkspacePath] = createSignal(resolve(process.env.MINT_WORKSPACE || invocationCwd()));
   let agentLimits = { maxToolRounds: 12, maxToolCallsPerTurn: 24 };
   let pendingProposalId: string | undefined;
   let pendingCommandId: string | undefined;
@@ -854,7 +855,7 @@ function App() {
     try {
       return workspacePath();
     } catch {
-      return process.cwd();
+      return invocationCwd();
     }
   };
 

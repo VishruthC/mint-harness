@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { loadConfig, writeDotEnv, updateDotEnvModel, type MintConfig } from "../src/config";
+import { envFilePath, invocationCwd } from "../src/paths";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 let directory = "";
 afterEach(() => {
@@ -71,6 +72,25 @@ describe("loadConfig", () => {
 
   test("rejects invalid effort values", () => {
     expect(() => loadConfig({ NVIDIA_API_KEY: "test-key", MINT_EFFORT: "invalid" })).toThrow();
+  });
+});
+
+describe("invocation paths", () => {
+  test("falls back to the process cwd", () => {
+    expect(invocationCwd({})).toBe(process.cwd());
+    expect(envFilePath({})).toBe(join(process.cwd(), ".env"));
+  });
+
+  test("prefers the directory the launcher recorded", () => {
+    directory = mkdtempSync(join(tmpdir(), "mint-test-"));
+    expect(invocationCwd({ MINT_INVOCATION_CWD: directory })).toBe(resolve(directory));
+    expect(envFilePath({ MINT_INVOCATION_CWD: directory })).toBe(join(resolve(directory), ".env"));
+  });
+
+  test("honors an explicit env file path", () => {
+    directory = mkdtempSync(join(tmpdir(), "mint-test-"));
+    const custom = join(directory, "custom.env");
+    expect(envFilePath({ MINT_INVOCATION_CWD: tmpdir(), MINT_ENV_FILE: custom })).toBe(resolve(custom));
   });
 });
 

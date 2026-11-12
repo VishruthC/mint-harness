@@ -12,7 +12,7 @@ import { z } from "zod";
 import type { CatManifest, CatState } from "./types.ts";
 import { CAT_STATES } from "./types.ts";
 
-const CAT_ASSETS_ROOT = resolve(import.meta.dir, "assets");
+const MODULE_DIR = import.meta.dir;
 const DEFAULT_PACK = "default";
 
 const AnimationSchema = z.object({
@@ -36,8 +36,30 @@ export function parseManifest(value: unknown): CatManifest {
   return ManifestSchema.parse(value) as CatManifest;
 }
 
+/**
+ * Candidate asset roots in priority order. Source runs resolve to
+ * `src/cat/assets`; a bundle in `dist/` falls back to the shipped source
+ * assets, which are always part of the package.
+ */
+export function assetsRootCandidates(moduleDir = MODULE_DIR): string[] {
+  return [
+    resolve(moduleDir, "assets"),
+    resolve(moduleDir, "..", "src", "cat", "assets"),
+  ];
+}
+
+/** Pick the first existing candidate, or the first candidate as a fallback. */
+export function chooseAssetsRoot(candidates: readonly string[]): string {
+  for (const candidate of candidates) {
+    if (candidate && existsSync(candidate)) return candidate;
+  }
+  return candidates[0] ?? "";
+}
+
 export function assetsRoot(): string {
-  return process.env.MINT_CAT_ASSETS ? resolve(process.env.MINT_CAT_ASSETS) : CAT_ASSETS_ROOT;
+  const configured = process.env.MINT_CAT_ASSETS?.trim();
+  if (configured) return resolve(configured);
+  return chooseAssetsRoot(assetsRootCandidates());
 }
 
 export function packDir(pack: string): string {
