@@ -4,8 +4,8 @@ import { showToast } from "../lib/toast";
 export function initInstall(): void {
   const tabs = $$<HTMLButtonElement>("[data-install-tab]");
   const panels = $$<HTMLElement>("[data-install-panel]");
-  const copyButton = $<HTMLButtonElement>("[data-copy-install]");
-  if (!panels.length) return;
+  const copyButtons = $$<HTMLButtonElement>("[data-copy-install]");
+  if (!panels.length && !copyButtons.length) return;
 
   const activate = (name: string, focus = false): void => {
     for (const tab of tabs) {
@@ -45,9 +45,9 @@ export function initInstall(): void {
     });
   }
 
-  const activeCode = (): string => {
-    const activePanel = $<HTMLElement>(".install-panel.is-active");
-    return activePanel?.querySelector("pre")?.textContent?.trim() ?? "";
+  const panelCode = (): string => {
+    const active = $<HTMLElement>("[data-install-panel].is-active") ?? panels[0];
+    return active?.querySelector("pre")?.textContent?.trim() ?? "";
   };
 
   const copyFallback = (text: string): boolean => {
@@ -70,42 +70,47 @@ export function initInstall(): void {
     return copied;
   };
 
-  const copied = (): void => {
-    if (!copyButton) return;
-    const original = copyButton.textContent ?? "copy";
-    copyButton.textContent = "copied ✓";
-    showToast("Install steps copied to the clipboard.");
+  const copied = (button: HTMLButtonElement): void => {
+    const original = button.dataset.copyLabel ?? button.textContent ?? "copy";
+    button.dataset.copyLabel = original;
+    button.textContent = "copied ✓";
+    showToast("Install command copied to the clipboard.");
     window.setTimeout(() => {
-      copyButton.textContent = original;
+      button.textContent = original;
     }, 1800);
   };
 
-  copyButton?.addEventListener("click", async () => {
-    const text = activeCode();
-    if (!text) return;
+  for (const button of copyButtons) {
+    button.addEventListener("click", async () => {
+      const text = button.dataset.copyText?.trim() || panelCode();
+      if (!text) return;
 
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(text);
-        copied();
-        return;
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(text);
+          copied(button);
+          return;
+        }
+      } catch {
+        // Fall through to the selection-based fallback.
       }
-    } catch {
-      // Fall through to the selection-based fallback.
-    }
 
-    if (copyFallback(text)) copied();
-    else showToast("Copy failed — select the command block manually.");
-  });
+      if (copyFallback(text)) copied(button);
+      else showToast("Copy failed — select the command block manually.");
+    });
+  }
 
   if (tabs.length) {
-    activate(tabs.find((tab) => tab.classList.contains("is-active"))?.dataset.installTab ?? "powershell");
+    activate(
+      tabs.find((tab) => tab.classList.contains("is-active"))?.dataset.installTab ??
+        tabs[0]?.dataset.installTab ??
+        "",
+    );
     return;
   }
 
-  const fallback = panels[0];
-  if (fallback) {
-    fallback.classList.add("is-active");
-    fallback.hidden = false;
-  }
+  panels.forEach((panel, index) => {
+    panel.classList.toggle("is-active", index === 0);
+    panel.hidden = index !== 0;
+  });
 }

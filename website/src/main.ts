@@ -1,3 +1,4 @@
+import "@fontsource-variable/instrument-sans/wght.css";
 import "@fontsource-variable/newsreader/wght.css";
 import "@fontsource-variable/newsreader/wght-italic.css";
 import "@fontsource/victor-mono/latin-400.css";
@@ -7,6 +8,7 @@ import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/layout.css";
 import "./styles/sections.css";
+import "./styles/premium.css";
 import "./styles/motion.css";
 
 import { ScrollTrigger } from "./lib/gsap";

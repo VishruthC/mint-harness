@@ -3,21 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>MINT — A small harness with sharp little claws.</title>
+    <title>MINT — The coding agent that asks first.</title>
     <meta
       name="description"
-      content="MINT is a terminal-native coding harness for NVIDIA models. It reads your workspace, proposes changes, and waits for your approval. It also has a cat."
+      content="MINT is an open-source, full-stack coding agent for your terminal. Bounded workspace reads, approval-gated edits, local SQLite sessions, and NVIDIA NIM."
     />
-    <meta name="theme-color" content="#f3eee5" />
-    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#0a0b10" />
+    <meta name="color-scheme" content="dark" />
     <link rel="canonical" href="https://vishruthc.github.io/mint-harness/" />
 
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="MINT" />
-    <meta property="og:title" content="MINT — A small harness with sharp little claws." />
+    <meta property="og:title" content="MINT — The coding agent that asks first." />
     <meta
       property="og:description"
-      content="A terminal-native coding harness for NVIDIA models. It reads your workspace, proposes changes, and waits for your approval. It also has a cat."
+      content="A full-stack coding agent for your terminal. Reads your workspace, proposes every change, and waits for your approval. Built with Bun, OpenTUI, SolidJS, NVIDIA NIM, and SQLite."
     />
     <meta property="og:url" content="https://vishruthc.github.io/mint-harness/" />
     <meta property="og:image" content="https://vishruthc.github.io/mint-harness/og.png" />
@@ -25,18 +25,18 @@
     <meta property="og:image:height" content="630" />
     <meta
       property="og:image:alt"
-      content="MINT field notes: a paper social card with the MINT cat in a dark terminal specimen frame."
+      content="MINT — a full-stack coding agent for the terminal, with a small cat in the sidebar."
     />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="MINT — A small harness with sharp little claws." />
+    <meta name="twitter:title" content="MINT — The coding agent that asks first." />
     <meta
       name="twitter:description"
-      content="A terminal-native coding harness for NVIDIA models. Approval-gated edits, bounded reads, and one persistent pixel cat."
+      content="Full-stack, terminal-native, approval-gated. Local sessions, NVIDIA NIM, and one persistent pixel cat."
     />
     <meta name="twitter:image" content="https://vishruthc.github.io/mint-harness/og.png" />
     <meta
       name="twitter:image:alt"
-      content="MINT field notes: a paper social card with the MINT cat in a dark terminal specimen frame."
+      content="MINT — a full-stack coding agent for the terminal, with a small cat in the sidebar."
     />
 
     <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
@@ -63,16 +63,17 @@
       <a class="brand" href="#top" aria-label="MINT — back to top">
         <span class="brand-flower" aria-hidden="true">✿</span>
         <span class="brand-name">MINT</span>
-        <span class="brand-sub">tiny coding companion</span>
+        <span class="brand-sub">terminal coding agent</span>
       </a>
 
-      <nav class="site-nav" aria-label="Chapters">
-        <a href="#loop"><span>01</span> Loop</a>
-        <a href="#read"><span>02</span> Read</a>
-        <a href="#approve"><span>03</span> Approve</a>
-        <a href="#remember"><span>04</span> Remember</a>
-        <a href="#cat"><span>05</span> Cat</a>
-        <a href="#limits"><span>06</span> Limits</a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="#loop">Product</a>
+        <a href="#approve">Security</a>
+        <a href="#stack">Stack</a>
+        <a href="#cat">Cat</a>
+        <a href="https://github.com/VishruthC/mint-harness#readme" target="_blank" rel="noreferrer"
+          >Docs ↗</a
+        >
       </nav>
 
       <div class="header-actions">
@@ -84,6 +85,7 @@
         >
           GitHub <span aria-hidden="true">↗</span>
         </a>
+        <a class="header-install" href="#install">Install MINT</a>
         <button class="index-trigger" type="button" data-index-open aria-haspopup="dialog">
           <span>Index</span>
           <kbd data-kbd>⌘K</kbd>
@@ -91,74 +93,74 @@
       </div>
     </header>
 
-    <nav class="chapter-rail" aria-label="Chapter progress">
-      <span class="rail-line" aria-hidden="true"></span>
-      <a href="#top" class="rail-dot is-active" data-rail="top" aria-label="00 — Top"><span>00</span></a>
-      <a href="#loop" class="rail-dot" data-rail="loop" aria-label="01 — The loop"><span>01</span></a>
-      <a href="#read" class="rail-dot" data-rail="read" aria-label="02 — It reads"><span>02</span></a>
-      <a href="#approve" class="rail-dot" data-rail="approve" aria-label="03 — The gate"><span>03</span></a>
-      <a href="#remember" class="rail-dot" data-rail="remember" aria-label="04 — Sessions"><span>04</span></a>
-      <a href="#cat" class="rail-dot" data-rail="cat" aria-label="05 — The cat"><span>05</span></a>
-      <a href="#limits" class="rail-dot" data-rail="limits" aria-label="06 — Limits"><span>06</span></a>
-    </nav>
-
     <main id="main" tabindex="-1">
       <!-- 00 — HERO -->
       <section id="top" class="hero" data-section="top">
         <div class="hero-field" aria-hidden="true" data-hero-field>
           <span class="hero-field-grid"></span>
           <canvas class="hero-field-canvas" data-hero-dots aria-hidden="true"></canvas>
-          <span class="hero-field-label">FIELD NOTES / 00</span>
+          <span class="hero-field-label">MINT / FULL STACK / 00</span>
         </div>
 
         <div class="wrap hero-grid">
           <div class="hero-copy">
             <p class="eyebrow" data-reveal>
               <span class="status-dot"></span>
-              MINT / a terminal-native coding harness
+              v0.1.1 · open source · built for NVIDIA NIM
             </p>
 
             <h1 class="hero-title">
-              <span class="line"><span data-hero-line>A small harness</span></span>
-              <span class="line"><span data-hero-line>with <em>sharp little</em></span></span>
-              <span class="line"><span data-hero-line><em>claws.</em></span></span>
+              <span class="line"><span data-hero-line>Ship code with</span></span>
+              <span class="line"><span data-hero-line>an agent that</span></span>
+              <span class="line"><span data-hero-line><em>asks first.</em></span></span>
             </h1>
 
             <p class="hero-lede" data-reveal>
-              MINT is a terminal-native coding companion for NVIDIA models. It reads your
-              workspace, proposes changes, and waits for your yes. It also has a cat.
+              MINT is a full-stack coding agent for your terminal. It reads your workspace,
+              proposes every change, and waits for your approval. NVIDIA NIM under the hood.
+              Your sessions never leave your machine.
             </p>
 
-            <div class="hero-actions" data-reveal>
-              <a class="button button--primary" href="#loop">
-                See how it works <span aria-hidden="true">↓</span>
-              </a>
-              <a
-                class="button button--ghost"
-                href="https://github.com/VishruthC/mint-harness"
-                target="_blank"
-                rel="noreferrer"
+            <div class="hero-install" data-reveal>
+              <span class="hero-install-prompt" aria-hidden="true">$</span>
+              <code>npm install -g mint-harness</code>
+              <button
+                class="copy-button"
+                type="button"
+                data-copy-install
+                data-copy-text="npm install -g mint-harness"
               >
-                Source on GitHub <span aria-hidden="true">↗</span>
-              </a>
+                copy
+              </button>
+            </div>
+            <p class="hero-install-note" data-reveal>
+              then run <code>minth</code> inside any project · configure with <code>/connect</code>
+            </p>
+
+            <div class="hero-links" data-reveal>
+              <a href="#loop">Explore the product <span aria-hidden="true">↓</span></a>
+              <a href="https://github.com/VishruthC/mint-harness" target="_blank" rel="noreferrer"
+                >Read the source <span aria-hidden="true">↗</span></a
+              >
+              <a href="#install">Quickstart <span aria-hidden="true">→</span></a>
             </div>
 
             <dl class="hero-meta" data-reveal>
               <div>
-                <dt>Runtime</dt>
+                <dt>RUNTIME</dt>
                 <dd>Bun 1.3.14+</dd>
               </div>
               <div>
-                <dt>Interface</dt>
+                <dt>INTERFACE</dt>
                 <dd>OpenTUI + Solid</dd>
               </div>
               <div>
-                <dt>Model</dt>
+                <dt>MODEL</dt>
                 <dd>NVIDIA NIM</dd>
               </div>
               <div>
-                <dt>Status</dt>
-                <dd><span class="status-dot"></span> v0.1.0 · in development</dd>
+                <dt>LICENSE</dt>
+                <dd>MIT · local SQLite</dd>
               </div>
             </dl>
           </div>
@@ -313,33 +315,100 @@
           </figure>
         </div>
 
-        <div class="wrap hero-command-strip" aria-label="Real MINT commands">
-          <span class="strip-label">COMMANDS</span>
+        <div class="wrap hero-stack-strip">
+          <span class="strip-label">BUILT WITH</span>
           <div class="strip-items">
-            <code>/project</code>
-            <code>/capabilities</code>
-            <code>/propose</code>
-            <code>/apply</code>
-            <code>/command</code>
-            <code>/run</code>
-            <code>/pet</code>
-            <code>/cat</code>
+            <span>Bun</span>
+            <span>TypeScript</span>
+            <span>SolidJS</span>
+            <span>OpenTUI</span>
+            <span>NVIDIA NIM</span>
+            <span>SQLite</span>
           </div>
-          <span class="strip-note">no web browsing · no external apps</span>
+          <span class="strip-note">MIT licensed · local first · zero telemetry</span>
         </div>
       </section>
 
-      <!-- 01 — THE LOOP -->
+      <!-- 01 — QUICKSTART -->
+      <section id="install" class="chapter chapter--install" data-section="install">
+        <div class="wrap install-grid">
+          <div class="install-copy">
+            <header class="chapter-head">
+              <p class="chapter-number" data-reveal>01 / QUICKSTART</p>
+              <h2 data-reveal>One command. <em>Then it’s yours.</em></h2>
+              <p class="chapter-kicker" data-reveal>
+                Install MINT globally, run it inside any project, and connect your NVIDIA key.
+                No clone, no build step, no config file required.
+              </p>
+            </header>
+
+            <ol class="install-steps" data-reveal>
+              <li>
+                <span>01</span>
+                <div>
+                  <strong>Install the CLI</strong>
+                  <p><code>npm install -g mint-harness</code> — Node and npm handle the install.</p>
+                </div>
+              </li>
+              <li>
+                <span>02</span>
+                <div>
+                  <strong>Open your project</strong>
+                  <p><code>cd path/to/your-project</code> then start <code>minth</code>.</p>
+                </div>
+              </li>
+              <li>
+                <span>03</span>
+                <div>
+                  <strong>Connect NVIDIA NIM</strong>
+                  <p>Run <code>/connect</code> once, or add <code>NVIDIA_API_KEY</code> to a local <code>.env</code>.</p>
+                </div>
+              </li>
+            </ol>
+
+            <p class="install-note" data-reveal>
+              Sessions live in <code>~/.mint/mint.sqlite</code> (or <code>MINT_DATA_DIR</code>).
+              No account, no telemetry, no cloud sync.
+            </p>
+          </div>
+
+          <div class="install-terminal" data-install-panel="npm" data-reveal>
+            <div class="install-terminal-head">
+              <span>zsh — ~/projects/your-app</span>
+              <button class="copy-button" type="button" data-copy-install>copy</button>
+            </div>
+            <pre><code><span class="terminal-comment"># 1 — install once</span>
+npm install -g mint-harness
+
+<span class="terminal-comment"># 2 — run inside any project</span>
+cd <span class="terminal-path">path/to/your-project</span>
+<span class="terminal-accent">minth</span></code></pre>
+            <div class="install-terminal-foot">
+              <span>node + bun 1.3.14+</span>
+              <span>connect with <code>/connect</code></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="wrap install-req-grid" data-reveal>
+          <div><span>REQUIRES</span><strong>Node.js + npm</strong></div>
+          <div><span>RUNTIME</span><strong>Bun 1.3.14+</strong></div>
+          <div><span>MODEL</span><strong>NVIDIA API key</strong></div>
+          <div><span>PLATFORMS</span><strong>Linux · macOS · Windows</strong></div>
+        </div>
+      </section>
+
+      <!-- 02 — THE LOOP -->
       <section id="loop" class="chapter chapter--dark chapter--loop" data-section="loop">
         <div class="loop-pin" data-loop-pin>
           <div class="wrap loop-layout">
             <div class="loop-copy">
               <header class="chapter-head chapter-head--dark">
-                <p class="chapter-number" data-reveal>01 / THE LOOP</p>
-                <h2 data-reveal>One turn, <em>end to end.</em></h2>
+                <p class="chapter-number" data-reveal>02 / HOW IT WORKS</p>
+                <h2 data-reveal>One turn. <em>You stay in control.</em></h2>
                 <p class="chapter-kicker" data-reveal>
-                  The registry is generated from the running harness. <code>/capabilities</code>
-                  shows what is actually available.
+                  Every request follows the same bounded loop. Tools can read or propose;
+                  only you can approve.
                 </p>
               </header>
 
@@ -500,16 +569,16 @@
         </div>
       </section>
 
-      <!-- 02 — IT READS -->
+      <!-- 03 — IT READS -->
       <section id="read" class="chapter chapter--paper chapter--read" data-section="read">
         <div class="wrap">
           <header class="chapter-head chapter-head--split">
             <div>
-              <p class="chapter-number" data-reveal>02 / IT READS</p>
-              <h2 data-reveal>It looks <em>before it leaps.</em></h2>
+              <p class="chapter-number" data-reveal>03 / WORKSPACE</p>
+              <h2 data-reveal>Context with <em>guardrails.</em></h2>
             </div>
             <p class="chapter-kicker" data-reveal>
-              Reads are bounded. Writes are proposals. Sensitive files stay shut.
+              Bounded reads, explicit proposals, and sensitive files refused by name.
             </p>
           </header>
 
@@ -613,16 +682,17 @@
         </div>
       </section>
 
-      <!-- 03 — IT ASKS -->
+      <!-- 04 — IT ASKS -->
       <section id="approve" class="chapter chapter--dark chapter--approve" data-section="approve">
         <div class="approval-pin" data-approval-pin>
           <div class="wrap approval-layout">
             <div class="approval-copy">
               <header class="chapter-head chapter-head--dark">
-                <p class="chapter-number" data-reveal>03 / THE GATE</p>
-                <h2 data-reveal>The model can ask. <em>Only you can approve.</em></h2>
+                <p class="chapter-number" data-reveal>04 / APPROVAL</p>
+                <h2 data-reveal>The model proposes. <em>You decide.</em></h2>
                 <p class="chapter-kicker" data-reveal>
-                  A diff you didn’t read is just a wish. Every patch and every command waits here.
+                  Every patch and every command stops here. Approval is explicit, single-use, and
+                  never self-granted.
                 </p>
               </header>
 
@@ -723,7 +793,7 @@
 
         <div class="wrap command-section">
           <div class="command-intro">
-            <p class="chapter-number" data-reveal>03b / COMMANDS</p>
+            <p class="chapter-number" data-reveal>04b / COMMANDS</p>
             <h2 data-reveal>A leash, <em>not a sandbox.</em></h2>
             <p class="chapter-kicker" data-reveal>
               The model can propose one executable and its arguments. You inspect the command,
@@ -784,16 +854,16 @@ output capped at 24,000 characters</code></pre>
         </div>
       </section>
 
-      <!-- 04 — IT REMEMBERS -->
+      <!-- 05 — IT REMEMBERS -->
       <section id="remember" class="chapter chapter--paper chapter--remember" data-section="remember">
         <div class="wrap">
           <header class="chapter-head chapter-head--split">
             <div>
-              <p class="chapter-number" data-reveal>04 / IT REMEMBERS</p>
-              <h2 data-reveal>Sessions with <em>a memory.</em></h2>
+              <p class="chapter-number" data-reveal>05 / LOCAL DATA</p>
+              <h2 data-reveal>Memory that <em>stays home.</em></h2>
             </div>
             <p class="chapter-kicker" data-reveal>
-              Created lazily on the first message. Each session remembers its own model.
+              Sessions are created lazily on the first message. Each one remembers its own model.
             </p>
           </header>
 
@@ -848,13 +918,108 @@ output capped at 24,000 characters</code></pre>
         </div>
       </section>
 
-      <!-- 05 — IT PURRS -->
+      <!-- 06 — FULL STACK -->
+      <section id="stack" class="chapter chapter--stack" data-section="stack">
+        <div class="wrap">
+          <header class="chapter-head chapter-head--split">
+            <div>
+              <p class="chapter-number" data-reveal>06 / FULL STACK</p>
+              <h2 data-reveal>Every layer. <em>One binary.</em></h2>
+            </div>
+            <p class="chapter-kicker" data-reveal>
+              Interface, runtime, model gateway, and local data ship together. No hosted backend
+              required to start.
+            </p>
+          </header>
+
+          <div class="stack-grid">
+            <article class="stack-card" data-reveal>
+              <span class="stack-card-index">01</span>
+              <span class="stack-card-label">INTERFACE</span>
+              <h3>A terminal that feels designed.</h3>
+              <p>
+                SolidJS and OpenTUI render streaming chat, session state, approval cards, and one
+                very opinionated cat — all inside the terminal.
+              </p>
+              <ul>
+                <li>SolidJS</li>
+                <li>OpenTUI</li>
+                <li>Streaming UI</li>
+              </ul>
+            </article>
+
+            <article class="stack-card" data-reveal>
+              <span class="stack-card-index">02</span>
+              <span class="stack-card-label">RUNTIME</span>
+              <h3>A bounded agent loop.</h3>
+              <p>
+                A Bun-native runtime builds the tool registry, streams model responses, and
+                enforces hard limits on rounds and tool calls.
+              </p>
+              <ul>
+                <li>Bun</li>
+                <li>TypeScript</li>
+                <li>12 rounds / 24 calls</li>
+              </ul>
+            </article>
+
+            <article class="stack-card" data-reveal>
+              <span class="stack-card-index">03</span>
+              <span class="stack-card-label">MODEL</span>
+              <h3>NVIDIA NIM at the core.</h3>
+              <p>
+                OpenAI-compatible streaming with tool calls. Switch between hosted models without
+                changing the harness or losing the thread.
+              </p>
+              <ul>
+                <li>NVIDIA NIM</li>
+                <li>Tool calls</li>
+                <li>Model per session</li>
+              </ul>
+            </article>
+
+            <article class="stack-card" data-reveal>
+              <span class="stack-card-index">04</span>
+              <span class="stack-card-label">DATA</span>
+              <h3>Local by default.</h3>
+              <p>
+                Sessions, models, and cat unlocks live in SQLite on your machine. No account, no
+                telemetry, no cloud dependency in the loop.
+              </p>
+              <ul>
+                <li>SQLite</li>
+                <li>Local-first</li>
+                <li>No telemetry</li>
+              </ul>
+            </article>
+          </div>
+
+          <div class="stack-flow" data-reveal>
+            <span>TERMINAL UI</span>
+            <i>→</i>
+            <span>AGENT RUNTIME</span>
+            <i>→</i>
+            <span>NVIDIA NIM</span>
+            <i>→</i>
+            <span>APPROVAL GATE</span>
+            <i>→</i>
+            <span>WORKSPACE / SQLITE</span>
+          </div>
+
+          <p class="specimen-caption">
+            <span class="specimen-fig">Fig. 06</span>
+            <span>A full-stack product that ships as a single CLI.</span>
+          </p>
+        </div>
+      </section>
+
+      <!-- 07 — IT PURRS -->
       <section id="cat" class="chapter chapter--paper chapter--cat" data-section="cat">
         <div class="wrap">
           <header class="chapter-head chapter-head--split">
             <div>
-              <p class="chapter-number" data-reveal>05 / IT PURRS</p>
-              <h2 data-reveal>The cat has <em>no permissions.</em></h2>
+              <p class="chapter-number" data-reveal>07 / DELIGHT</p>
+              <h2 data-reveal>A little delight. <em>Zero permissions.</em></h2>
             </div>
             <p class="chapter-kicker" data-reveal>
               The cat is cosmetic. The approval gate is not.
@@ -949,19 +1114,19 @@ output capped at 24,000 characters</code></pre>
           </div>
 
           <p class="specimen-caption">
-            <span class="specimen-fig">Fig. 05</span>
+            <span class="specimen-fig">Fig. 07</span>
             <span>Runs entirely in your browser. The cat talks to no API.</span>
           </p>
         </div>
       </section>
 
-      <!-- 06 — IT HAS LIMITS -->
+      <!-- 08 — IT HAS LIMITS -->
       <section id="limits" class="chapter chapter--paper chapter--limits" data-section="limits">
         <div class="wrap">
           <header class="chapter-head chapter-head--split">
             <div>
-              <p class="chapter-number" data-reveal>06 / IT HAS LIMITS</p>
-              <h2 data-reveal>A leash, <em>not a sandbox.</em></h2>
+              <p class="chapter-number" data-reveal>08 / TRUST</p>
+              <h2 data-reveal>Trust is a <em>feature.</em></h2>
             </div>
             <p class="chapter-kicker" data-reveal>
               No browsing. No external apps. No sandbox claims. A short, honest ledger.
@@ -992,7 +1157,6 @@ output capped at 24,000 characters</code></pre>
                 <li>Searchable session history</li>
                 <li>Session export and import</li>
                 <li>Context compaction</li>
-                <li>Production packaging</li>
               </ul>
             </article>
 
@@ -1018,61 +1182,35 @@ output capped at 24,000 characters</code></pre>
           </div>
 
           <p class="specimen-caption">
-            <span class="specimen-fig">Fig. 06</span>
+            <span class="specimen-fig">Fig. 08</span>
             <span>Current milestone: interactive MINT harness. Web browsing is not implemented.</span>
           </p>
         </div>
       </section>
 
-      <!-- 07 — INSTALL -->
-      <section id="install" class="chapter chapter--paper chapter--install" data-section="install">
-        <div class="wrap install-grid">
-          <div class="install-copy">
-            <header class="chapter-head">
-              <p class="chapter-number" data-reveal>07 / INSTALL</p>
-              <h2 data-reveal>Take it <em>for a walk.</em></h2>
-              <p class="chapter-kicker" data-reveal>
-                One global install, an NVIDIA API key, and a terminal that can hold a cat.
-              </p>
-            </header>
-
-            <ul class="requirements" data-reveal>
-              <li><span>01</span> Node.js and npm to install globally</li>
-              <li><span>02</span> Bun 1.3.14 or newer on your PATH</li>
-              <li><span>03</span> An NVIDIA API key with access to a hosted model</li>
-              <li><span>04</span> Linux x64, macOS, or Windows x64 / WSL</li>
-            </ul>
-
-            <p class="install-note" data-reveal>
-              Run <code>minth</code> inside the project you want MINT to work in. Configure your key
-              with <code>/connect</code> or a local <code>.env</code>. Session history stays in
-              <code>~/.mint/mint.sqlite</code> (or <code>MINT_DATA_DIR</code>).
-            </p>
-          </div>
-
-          <div class="install-card" data-install-card data-reveal>
-            <div
-              class="install-panel is-active"
-              data-install-panel="npm"
+      <!-- 09 — CTA -->
+      <section id="start" class="chapter chapter--cta" data-section="start">
+        <div class="wrap cta-panel">
+          <p class="chapter-number" data-reveal>READY WHEN YOU ARE</p>
+          <h2 data-reveal>Give it a project. <em>It will ask first.</em></h2>
+          <p data-reveal>
+            Install MINT in one command, connect NVIDIA NIM, and keep every session on your
+            machine. Open source under the MIT license.
+          </p>
+          <div class="cta-actions" data-reveal>
+            <a class="button button--primary" href="#install">Install MINT ↑</a>
+            <a
+              class="button button--ghost"
+              href="https://github.com/VishruthC/mint-harness"
+              target="_blank"
+              rel="noreferrer"
             >
-              <pre><code>npm install -g mint-harness
-
-cd path/to/your-project
-minth</code></pre>
-            </div>
-
-            <div class="install-card-foot">
-              <span>install once · run <code>minth</code> in any project · configure with <code>/connect</code></span>
-              <button class="copy-button" type="button" data-copy-install>copy</button>
-            </div>
-
-            <div class="install-links">
-              <a href="https://github.com/VishruthC/mint-harness" target="_blank" rel="noreferrer">Source ↗</a>
-              <a href="https://github.com/VishruthC/mint-harness#readme" target="_blank" rel="noreferrer">README ↗</a>
-              <a href="https://github.com/VishruthC/mint-harness/blob/main/docs/ROADMAP.md" target="_blank" rel="noreferrer">Roadmap ↗</a>
-              <a href="https://github.com/VishruthC/mint-harness/blob/main/LICENSE" target="_blank" rel="noreferrer">License ↗</a>
-            </div>
+              Star on GitHub ↗
+            </a>
           </div>
+          <p class="cta-note" data-reveal>
+            <code>npm install -g mint-harness</code> · MIT · v0.1.1
+          </p>
         </div>
       </section>
     </main>
@@ -1084,31 +1222,36 @@ minth</code></pre>
         <div class="footer-grid">
           <div class="footer-brand">
             <p>
-              A small harness with sharp little claws. Built with Bun, OpenTUI, SolidJS, and
-              NVIDIA NIM. It reads carefully, asks first, and purrs.
+              MINT is an open-source, terminal-native coding agent. Built with Bun, OpenTUI,
+              SolidJS, NVIDIA NIM, and SQLite. It reads carefully, asks first, and purrs.
             </p>
             <p class="footer-status"><span class="status-dot"></span> v0.1.1 · in development</p>
           </div>
 
-          <nav class="footer-nav" aria-label="Project links">
-            <p class="footer-label">PROJECT</p>
+          <nav class="footer-nav" aria-label="Product">
+            <p class="footer-label">PRODUCT</p>
+            <a href="#install">Quickstart</a>
+            <a href="#loop">How it works</a>
+            <a href="#approve">Security</a>
+            <a href="#stack">Full stack</a>
+            <a href="#cat">The cat</a>
+          </nav>
+
+          <nav class="footer-nav" aria-label="Resources">
+            <p class="footer-label">RESOURCES</p>
             <a href="https://github.com/VishruthC/mint-harness" target="_blank" rel="noreferrer">GitHub ↗</a>
             <a href="https://github.com/VishruthC/mint-harness#readme" target="_blank" rel="noreferrer">README ↗</a>
             <a href="https://github.com/VishruthC/mint-harness/blob/main/docs/ROADMAP.md" target="_blank" rel="noreferrer">Roadmap ↗</a>
+            <a href="https://github.com/VishruthC/mint-harness/blob/main/CHANGELOG.md" target="_blank" rel="noreferrer">Changelog ↗</a>
             <a href="https://github.com/VishruthC/mint-harness/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT License ↗</a>
-          </nav>
-
-          <nav class="footer-nav" aria-label="Elsewhere">
-            <p class="footer-label">ELSEWHERE</p>
-            <a href="https://github.com/VishruthC" target="_blank" rel="noreferrer">VishruthC ↗</a>
-            <a href="#top">Back to top ↑</a>
           </nav>
 
           <div class="footer-meta">
             <p class="footer-label">COLOPHON</p>
-            <p>Set in Newsreader, Victor Mono, and Departure Mono.</p>
-            <p>Paper, ink, and one canvas cat.</p>
-            <p>No analytics. No cookies.</p>
+            <p>Set in Newsreader, Instrument Sans, Victor Mono, and Departure Mono.</p>
+            <p>Terminal, local SQLite, and one very small cat.</p>
+            <p>No analytics. No cookies. No cloud sync.</p>
+            <p><a href="#top">Back to top ↑</a></p>
           </div>
         </div>
 
@@ -1127,7 +1270,7 @@ minth</code></pre>
         <div class="index-head">
           <div>
             <p class="eyebrow">MINT / INDEX</p>
-            <h2 id="index-title">Jump to a chapter.</h2>
+            <h2 id="index-title">Jump to a section.</h2>
           </div>
           <button class="index-close" type="button" data-index-close aria-label="Close index">✕</button>
         </div>
@@ -1136,8 +1279,8 @@ minth</code></pre>
           <span aria-hidden="true">⌕</span>
           <input
             type="search"
-            placeholder="Chapter, command, or action…"
-            aria-label="Search chapters"
+            placeholder="Section, command, or action…"
+            aria-label="Search sections"
             data-index-search
             autocomplete="off"
             spellcheck="false"
@@ -1145,44 +1288,49 @@ minth</code></pre>
         </label>
 
         <div class="index-list" data-index-list>
-          <a href="#top" data-index-item data-keywords="top hero start intro">
+          <a href="#top" data-index-item data-keywords="top hero start intro install quickstart">
             <span class="index-num">00</span>
-            <span class="index-text"><strong>Top</strong><em>The small harness with sharp little claws</em></span>
+            <span class="index-text"><strong>Top</strong><em>The coding agent that asks first</em></span>
             <span class="index-arrow">→</span>
           </a>
-          <a href="#loop" data-index-item data-keywords="loop how it works registry nvidia nim tools">
+          <a href="#install" data-index-item data-keywords="install quickstart npm node bun nvidia api key minth connect">
             <span class="index-num">01</span>
-            <span class="index-text"><strong>The loop</strong><em>One turn, end to end</em></span>
+            <span class="index-text"><strong>Quickstart</strong><em>One command, then it's yours</em></span>
             <span class="index-arrow">→</span>
           </a>
-          <a href="#read" data-index-item data-keywords="read workspace files search gitignore sensitive boundary">
+          <a href="#loop" data-index-item data-keywords="loop how it works registry nvidia nim tools approval">
             <span class="index-num">02</span>
-            <span class="index-text"><strong>It reads</strong><em>Bounded workspace tools</em></span>
+            <span class="index-text"><strong>How it works</strong><em>One turn, end to end</em></span>
             <span class="index-arrow">→</span>
           </a>
-          <a href="#approve" data-index-item data-keywords="approve apply run diff patch terminal command gate">
+          <a href="#read" data-index-item data-keywords="read workspace files search gitignore sensitive boundary context">
             <span class="index-num">03</span>
-            <span class="index-text"><strong>The gate</strong><em>Approval for edits and commands</em></span>
+            <span class="index-text"><strong>Workspace</strong><em>Context with guardrails</em></span>
             <span class="index-arrow">→</span>
           </a>
-          <a href="#remember" data-index-item data-keywords="remember sessions sqlite resume model">
+          <a href="#approve" data-index-item data-keywords="approve apply run diff patch terminal command gate security">
             <span class="index-num">04</span>
-            <span class="index-text"><strong>It remembers</strong><em>SQLite sessions and models</em></span>
+            <span class="index-text"><strong>Approval</strong><em>The model proposes, you decide</em></span>
             <span class="index-arrow">→</span>
           </a>
-          <a href="#cat" data-index-item data-keywords="cat pet feed expressions wizard chaos zoomies">
+          <a href="#remember" data-index-item data-keywords="remember sessions sqlite resume model local data">
             <span class="index-num">05</span>
-            <span class="index-text"><strong>It purrs</strong><em>The cat with no permissions</em></span>
+            <span class="index-text"><strong>Local data</strong><em>Memory that stays home</em></span>
             <span class="index-arrow">→</span>
           </a>
-          <a href="#limits" data-index-item data-keywords="limits sandbox roadmap not yet web browsing">
+          <a href="#stack" data-index-item data-keywords="stack full stack solid opentui bun typescript nvidia sqlite architecture">
             <span class="index-num">06</span>
-            <span class="index-text"><strong>Limits</strong><em>A leash, not a sandbox</em></span>
+            <span class="index-text"><strong>Full stack</strong><em>Every layer, one binary</em></span>
             <span class="index-arrow">→</span>
           </a>
-          <a href="#install" data-index-item data-keywords="install npm bun nvidia api key minth">
+          <a href="#cat" data-index-item data-keywords="cat pet feed expressions wizard chaos zoomies delight">
             <span class="index-num">07</span>
-            <span class="index-text"><strong>Install</strong><em>Take it for a walk</em></span>
+            <span class="index-text"><strong>The cat</strong><em>A little delight, zero permissions</em></span>
+            <span class="index-arrow">→</span>
+          </a>
+          <a href="#limits" data-index-item data-keywords="limits trust sandbox roadmap not yet web browsing">
+            <span class="index-num">08</span>
+            <span class="index-text"><strong>Trust</strong><em>What ships, what doesn't, what never will</em></span>
             <span class="index-arrow">→</span>
           </a>
           <a
@@ -1190,7 +1338,7 @@ minth</code></pre>
             target="_blank"
             rel="noreferrer"
             data-index-item
-            data-keywords="github source code repository"
+            data-keywords="github source code repository docs"
           >
             <span class="index-num">↗</span>
             <span class="index-text"><strong>Source on GitHub</strong><em>VishruthC/mint-harness</em></span>
