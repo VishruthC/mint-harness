@@ -1,10 +1,12 @@
-export type ApprovalRequestKind = "permission" | "apply";
+export type ApprovalRequestKind = "permission" | "apply" | "update";
 
 export type ApprovalAction =
   | "allow-once"
   | "allow-always"
   | "reject"
-  | "apply";
+  | "apply"
+  | "update"
+  | "cancel";
 
 export type FileApplyDetails = {
   kind: "file-apply";
@@ -25,7 +27,14 @@ export type CommandPermissionDetails = {
   timeoutMs: number;
 };
 
-export type ApprovalDetails = FileApplyDetails | CommandPermissionDetails;
+export type UpdateDetails = {
+  kind: "update";
+  fromVersion: string;
+  toVersion: string;
+  command: string;
+};
+
+export type ApprovalDetails = FileApplyDetails | CommandPermissionDetails | UpdateDetails;
 
 export type ApprovalRequest = {
   id: string;
@@ -115,6 +124,37 @@ export function createCommandPermissionRequest(
   };
 }
 
+export function createUpdateRequest(
+  seq: number,
+  details: UpdateDetails,
+): ApprovalRequest {
+  return {
+    id: `approval-update-${details.toVersion}`,
+    seq,
+    kind: "update",
+    title: "✨ MINT update available!",
+    description: `Update MINT from ${details.fromVersion} to ${details.toVersion}?`,
+    resource: "mint-harness · npm registry",
+    patterns: [details.command],
+    details,
+    scopeKey: `update:${details.toVersion}`,
+    actions: ["update", "cancel"],
+    defaultAction: "update",
+    fullscreenDetails: [
+      `Installed: ${details.fromVersion}`,
+      `Latest stable: ${details.toVersion}`,
+      "",
+      "MINT will run:",
+      details.command,
+      "",
+      "The update is downloaded from the public npm registry.",
+      "MINT will not restart automatically; restart it after the update.",
+    ],
+    createdAt: Date.now(),
+    stale: false,
+  };
+}
+
 export function moveActionIndex(current: number, delta: number, count: number): number {
   if (count <= 0) return 0;
   return (current + delta + count) % count;
@@ -130,12 +170,19 @@ export function actionLabel(action: ApprovalAction): string {
       return "Reject";
     case "apply":
       return "Apply";
+    case "update":
+      return "Yes, update";
+    case "cancel":
+      return "Cancel";
   }
 }
 
 export function footerHint(kind: ApprovalRequestKind): string {
   if (kind === "apply") {
     return "Apply   Reject   ctrl+f fullscreen   ⇆ select   enter confirm";
+  }
+  if (kind === "update") {
+    return "Yes, update   Cancel   ctrl+f fullscreen   ⇆ select   enter confirm";
   }
   return "Allow once   Allow always   Reject   ctrl+f fullscreen   ⇆ select   enter confirm";
 }

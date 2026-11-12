@@ -1,5 +1,7 @@
-/* ── Hero TUI ─────────────────────────────────────────────── */
-
+﻿/* Hallmark · redesign: full · shape: custom portfolio · theme: maintained palette · hero: stage · nav: edge-aligned · footer: mast+cta · v2.0.0
+ * pre-emit critique: P4 H5 E4 S4 R4 V4 · weakest: E, preserved all demo wiring and color tokens while recomposing layout
+ * redesign: full · scope: page · copy: tightened labels, content kept
+ */
 .hero-specimen {
   position: relative;
 }
@@ -510,7 +512,7 @@
   }
 }
 
-/* ── Loop scene ───────────────────────────────────────────── */
+/* â”€â”€ Loop scene â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .loop-steps {
   display: grid;
@@ -707,7 +709,7 @@
   margin-top: 12px;
 }
 
-/* ── Read scene ───────────────────────────────────────────── */
+/* â”€â”€ Read scene â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .read-copy {
   display: grid;
@@ -987,7 +989,7 @@
   font-size: 9px;
 }
 
-/* ── Approval scene ───────────────────────────────────────── */
+/* â”€â”€ Approval scene â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .approval-checks {
   display: grid;
@@ -1366,7 +1368,7 @@
   background: var(--terminal-add-bg);
 }
 
-/* ── Command demo ─────────────────────────────────────────── */
+/* â”€â”€ Command demo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .command-card {
   overflow: hidden;
@@ -1394,7 +1396,7 @@
 }
 
 .command-head::before {
-  content: "┃";
+  content: "â”ƒ";
   position: absolute;
   left: 9px;
   color: var(--terminal-yellow);
@@ -1422,7 +1424,7 @@
 }
 
 .command-line::before {
-  content: "┃";
+  content: "â”ƒ";
   margin-left: -12px;
   color: var(--terminal-yellow);
 }
@@ -1569,7 +1571,7 @@
   font-size: inherit;
 }
 
-/* ── Sessions ─────────────────────────────────────────────── */
+/* â”€â”€ Sessions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .session-copy {
   display: grid;
@@ -1734,7 +1736,7 @@
   color: var(--mint);
 }
 
-/* ── Cat ──────────────────────────────────────────────────── */
+/* â”€â”€ Cat â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .cat-copy {
   display: grid;
@@ -1880,7 +1882,7 @@
 }
 
 .cat-canvas-wrap[data-mood="love"]::after {
-  content: "♥  ♥  ♥";
+  content: "â™¥  â™¥  â™¥";
   top: 12%;
   left: 50%;
   color: var(--terminal-pink);
@@ -1892,7 +1894,7 @@
 }
 
 .cat-canvas-wrap[data-mood="wizard"]::after {
-  content: "✦  ✦";
+  content: "âœ¦  âœ¦";
   top: 13%;
   right: 16%;
   color: var(--terminal-lavender);
@@ -2199,7 +2201,7 @@
   line-height: 1.45;
 }
 
-/* ── Limits ───────────────────────────────────────────────── */
+/* â”€â”€ Limits â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .ledger {
   display: grid;
@@ -2251,7 +2253,7 @@
 }
 
 .ledger li::before {
-  content: "·";
+  content: "Â·";
   position: absolute;
   left: 0;
   color: var(--mint);
@@ -2311,7 +2313,7 @@
   letter-spacing: 0.05em;
 }
 
-/* ── Install ──────────────────────────────────────────────── */
+/* â”€â”€ Install â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .install-copy {
   display: grid;
@@ -2487,7 +2489,7 @@
   color: var(--terminal-mint);
 }
 
-/* ── Responsive details ───────────────────────────────────── */
+/* â”€â”€ Responsive details â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 @media (max-width: 980px) {
   .read-specimen {

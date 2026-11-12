@@ -4,10 +4,12 @@ import {
   actionLabel,
   createApplyRequest,
   createCommandPermissionRequest,
+  createUpdateRequest,
   footerHint,
   moveActionIndex,
   shouldAutoApprove,
 } from "../src/approval";
+import { UPDATE_COMMAND } from "../src/updater";
 
 describe("approval requests", () => {
   test("creates apply request with apply/reject actions and file scope", () => {
@@ -119,11 +121,13 @@ describe("approval queue", () => {
       deletions: 0,
       totalLines: 1,
     }));
-    const removed = queue.removeByPredicate((req) => req.details.proposalId === "a");
+    const removed = queue.removeByPredicate((req) => req.details.kind === "file-apply" && req.details.proposalId === "a");
     expect(removed).toHaveLength(1);
     expect(removed[0]?.stale).toBe(true);
     expect(queue.size()).toBe(1);
-    expect(queue.current()?.details.proposalId).toBe("b");
+    const current = queue.current();
+    expect(current?.details.kind).toBe("file-apply");
+    if (current?.details.kind === "file-apply") expect(current.details.proposalId).toBe("b");
   });
 
   test("clear empties the queue and marks items stale", () => {
@@ -140,6 +144,163 @@ describe("approval queue", () => {
     const removed = queue.clear();
     expect(removed).toHaveLength(1);
     expect(removed[0]?.stale).toBe(true);
+    expect(queue.size()).toBe(0);
+  });
+
+  test("queues update approvals alongside apply and command requests", () => {
+    const queue = new ApprovalQueue();
+    const update = queue.enqueue(createUpdateRequest(0, {
+      kind: "update",
+      fromVersion: "0.1.0",
+      toVersion: "0.1.1",
+      command: UPDATE_COMMAND,
+    }));
+    const apply = queue.enqueue(createApplyRequest(0, {
+      kind: "file-apply",
+      proposalId: "simultaneous",
+      path: "src/app.ts",
+      preview: "diff",
+      additions: 1,
+      deletions: 0,
+      totalLines: 1,
+    }));
+    const command = queue.enqueue(createCommandPermissionRequest(0, {
+      kind: "command",
+      proposalId: "simultaneous",
+      command: "bun test",
+      cwd: ".",
+      timeoutMs: 120000,
+    }));
+
+    expect(queue.size()).toBe(3);
+    expect(queue.all().map((request) => request.kind)).toEqual([
+      "update",
+      "apply",
+      "permission",
+    ]);
+    expect(new Set(queue.all().map((request) => request.seq)).size).toBe(3);
+
+    expect(queue.resolveCurrent(update)?.kind).toBe("update");
+    expect(queue.current()?.id).toBe(apply.id);
+    expect(queue.resolveCurrent(apply)?.kind).toBe("apply");
+    expect(queue.current()?.id).toBe(command.id);
+    expect(queue.resolveCurrent(command)?.kind).toBe("permission");
+    expect(queue.size()).toBe(0);
+  });
+
+  test("does not resolve an update request out of order", () => {
+    const queue = new ApprovalQueue();
+    const update = queue.enqueue(createUpdateRequest(0, {
+      kind: "update",
+      fromVersion: "0.1.0",
+      toVersion: "0.1.1",
+      command: UPDATE_COMMAND,
+    }));
+    const apply = queue.enqueue(createApplyRequest(0, {
+      kind: "file-apply",
+      proposalId: "behind-update",
+      path: "src/behind.ts",
+      preview: "diff",
+      additions: 1,
+      deletions: 0,
+      totalLines: 1,
+    }));
+
+    expect(queue.resolveCurrent(apply)).toBeUndefined();
+    expect(queue.size()).toBe(2);
+    expect(queue.current()?.id).toBe(update.id);
+
+    expect(queue.resolveCurrent(update)?.id).toBe(update.id);
+    expect(queue.current()?.id).toBe(apply.id);
+  });
+
+  test("removes only the matching update request", () => {
+    const queue = new ApprovalQueue();
+    const apply = queue.enqueue(createApplyRequest(0, {
+      kind: "file-apply",
+      proposalId: "kept",
+      path: "src/kept.ts",
+      preview: "diff",
+      additions: 1,
+      deletions: 0,
+      totalLines: 1,
+    }));
+    const update = queue.enqueue(createUpdateRequest(0, {
+      kind: "update",
+      fromVersion: "0.1.0",
+      toVersion: "0.1.1",
+      command: UPDATE_COMMAND,
+    }));
+    const command = queue.enqueue(createCommandPermissionRequest(0, {
+      kind: "command",
+      proposalId: "kept",
+      command: "bun run check",
+      cwd: ".",
+      timeoutMs: 120000,
+    }));
+
+    const removed = queue.removeByPredicate(
+      (request) => request.details.kind === "update" && request.details.toVersion === "0.1.1",
+    );
+
+    expect(removed).toHaveLength(1);
+    expect(removed[0]?.id).toBe(update.id);
+    expect(removed[0]?.stale).toBe(true);
+    expect(queue.all().map((request) => request.id)).toEqual([apply.id, command.id]);
+    expect(queue.all().every((request) => request.kind !== "update")).toBe(true);
+  });
+
+  test("clear marks queued update requests stale", () => {
+    const queue = new ApprovalQueue();
+    const update = queue.enqueue(createUpdateRequest(0, {
+      kind: "update",
+      fromVersion: "0.1.0",
+      toVersion: "0.1.1",
+      command: UPDATE_COMMAND,
+    }));
+    queue.enqueue(createApplyRequest(0, {
+      kind: "file-apply",
+      proposalId: "cleared",
+      path: "src/cleared.ts",
+      preview: "diff",
+      additions: 1,
+      deletions: 0,
+      totalLines: 1,
+    }));
+
+    const removed = queue.clear();
+
+    expect(removed).toHaveLength(2);
+    expect(removed.find((request) => request.id === update.id)?.stale).toBe(true);
+    expect(removed.every((request) => request.stale)).toBe(true);
+    expect(queue.size()).toBe(0);
+    expect(queue.current()).toBeUndefined();
+  });
+
+  test("distinguishes duplicate update requests for the same version by seq", () => {
+    const queue = new ApprovalQueue();
+    const first = queue.enqueue(createUpdateRequest(0, {
+      kind: "update",
+      fromVersion: "0.1.0",
+      toVersion: "0.1.1",
+      command: UPDATE_COMMAND,
+    }));
+    const second = queue.enqueue(createUpdateRequest(0, {
+      kind: "update",
+      fromVersion: "0.1.0",
+      toVersion: "0.1.1",
+      command: UPDATE_COMMAND,
+    }));
+
+    expect(first.id).toBe(second.id);
+    expect(first.scopeKey).toBe(second.scopeKey);
+    expect(first.seq).not.toBe(second.seq);
+
+    expect(queue.resolveCurrent(first)?.seq).toBe(first.seq);
+    expect(queue.current()?.seq).toBe(second.seq);
+    expect(queue.resolveCurrent(first)).toBeUndefined();
+    expect(queue.size()).toBe(1);
+    expect(queue.resolveCurrent(second)?.seq).toBe(second.seq);
     expect(queue.size()).toBe(0);
   });
 

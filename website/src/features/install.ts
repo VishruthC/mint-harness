@@ -46,7 +46,7 @@ export function initInstall(): void {
   }
 
   const activeCode = (): string => {
-    const activePanel = $<HTMLElement>(".install-panel.is-active");
+    const activePanel = $<HTMLElement>("[data-install-panel].is-active") ?? panels[0];
     return activePanel?.querySelector("pre")?.textContent?.trim() ?? "";
   };
 
@@ -81,7 +81,7 @@ export function initInstall(): void {
   };
 
   copyButton?.addEventListener("click", async () => {
-    const text = activeCode();
+    const text = copyButton.dataset.copyText?.trim() || activeCode();
     if (!text) return;
 
     try {

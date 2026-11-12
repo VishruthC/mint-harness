@@ -2,7 +2,7 @@
 
 A cute, terminal-native coding harness inspired by OpenCode's architecture, independently implemented and **NVIDIA API-only**.
 
-> Interactive OpenTUI chat with NVIDIA NIM streaming, SQLite sessions, model-callable workspace tools, targeted patch proposals, project-context discovery, approval-gated restricted terminal commands, repeated-tool-loop safeguards, and an animated cat companion. Web browsing is not implemented.
+> Interactive OpenTUI chat with NVIDIA NIM streaming, SQLite sessions, model-callable workspace tools, targeted patch proposals, project-context discovery, approval-gated restricted terminal commands, in-app npm update checks, repeated-tool-loop safeguards, and an animated cat companion. Web browsing is not implemented.
 
 ## Requirements
 
@@ -26,6 +26,15 @@ minth
 MINT uses the directory you launch it from as the workspace and only shows sessions created in that exact directory. Session data is stored in `~/.mint/mint.sqlite` by default (set `MINT_DATA_DIR` to override).
 
 > **Note:** npm installs ship a prebuilt Bun bundle (`dist/index.js`) alongside the source and cat assets, so JSX/Solid transforms are already applied. Make sure `bun` is installed and available on your `PATH`. The launcher runs from the package root for dependency resolution but preserves your launch directory as the workspace and `.env` location.
+
+## Updates
+
+Added in **0.1.1**. MINT checks the npm registry for a newer stable release in the background when it starts. The check never blocks the UI or chat input and fails silently when the network is unavailable. When a new version is available, MINT shows a small banner once per version. The last-notified version is stored separately in `~/.mint/update-state.json` (or under `MINT_DATA_DIR`) and never touches your API keys, `.env`, sessions, or history.
+
+- `/update` performs a fresh registry check, shows the installed and latest stable versions, and asks for explicit confirmation before running `npm install -g mint-harness@latest`.
+- `/version` shows the installed version, the latest known stable npm version, and whether an update is available.
+- MINT never installs an update without confirmation, never elevates privileges, and never restarts itself. After a successful update, exit and relaunch MINT to use the new version.
+- Updating requires a working `npm` on your `PATH` with permission to write to your global npm prefix.
 
 ## Configure
 
@@ -65,6 +74,8 @@ You can also create a local launcher in the source checkout with `bun run instal
 ## Commands
 
 - `/help` - show available commands
+- `/update` - check npm and install the latest stable release after confirmation
+- `/version` - show the installed version and update status
 - `/models` - refresh and list NVIDIA models (or open model picker)
 - `/model` - open interactive model picker
 - `/model <id>` - select a model directly (persists to `.env`)
@@ -113,6 +124,10 @@ Conversation history is stored in SQLite at `~/.mint/mint.sqlite` by default. Se
 bun install
 bun run check:windows
 ```
+
+## Changelog
+
+Release notes are in [CHANGELOG.md](./CHANGELOG.md).
 
 ## References
 

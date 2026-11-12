@@ -43,6 +43,7 @@ export function ApprovalPanel(props: {
     parts.push("• MINT");
     return parts.join(":");
   };
+  const detailSectionLabel = () => details()?.kind === "update" ? "Command" : "Patterns";
 
   return (
     <box
@@ -73,7 +74,7 @@ export function ApprovalPanel(props: {
         {`┃    ${props.request?.resource ?? ""}`}
       </text>
       <text fg="#9399b2" wrapMode="none">{"┃"}</text>
-      <text fg="#cba6f7" wrapMode="none">{"┃  Patterns"}</text>
+      <text fg="#cba6f7" wrapMode="none">{`┃  ${detailSectionLabel()}`}</text>
       <text fg="#9399b2" wrapMode="none">{"┃"}</text>
       <For each={(props.request?.patterns ?? []).slice(0, props.fullscreen ? 12 : 3)}>
         {(pattern) => <text fg="#cdd6f4" wrapMode="word" width="100%">{`┃  - ${pattern}`}</text>}
@@ -108,8 +109,9 @@ export function ApprovalPanel(props: {
           <For each={actions()}>
             {(action, index) => {
               const isSelected = () => index() === props.selectedIndex;
-              const fg = () => isSelected() ? "#1e1e2e" : action === "reject" ? "#f38ba8" : action === "allow-always" ? "#cba6f7" : "#a6e3a1";
-              const bg = () => isSelected() ? (action === "reject" ? "#f38ba8" : action === "allow-always" ? "#cba6f7" : "#a6e3a1") : "transparent";
+              const danger = action === "reject" || action === "cancel";
+              const fg = () => isSelected() ? "#1e1e2e" : danger ? "#f38ba8" : action === "allow-always" ? "#cba6f7" : "#a6e3a1";
+              const bg = () => isSelected() ? (danger ? "#f38ba8" : action === "allow-always" ? "#cba6f7" : "#a6e3a1") : "transparent";
               return (
                 <box
                   backgroundColor={bg()}
@@ -124,7 +126,7 @@ export function ApprovalPanel(props: {
             }}
           </For>
           <Show when={!compact()}>
-            <text fg="#9399b2" wrapMode="none" truncate={true}>{props.fullscreen ? "ctrl+f compact  ⇆ select  enter confirm" : footerHint(props.request?.kind ?? "apply").replace(/^(?:Allow once   Allow always   Reject|Apply   Reject)\s+/, "")}</text>
+            <text fg="#9399b2" wrapMode="none" truncate={true}>{props.fullscreen ? "ctrl+f compact  ⇆ select  enter confirm" : footerHint(props.request?.kind ?? "apply").replace(/^(?:Allow once   Allow always   Reject|Apply   Reject|Yes, update   Cancel)\s+/, "")}</text>
           </Show>
         </box>
         <Show when={props.width >= 60}>

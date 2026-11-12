@@ -52,12 +52,28 @@ import {
   actionLabel,
   createApplyRequest,
   createCommandPermissionRequest,
+  createUpdateRequest,
   moveActionIndex,
   type ApprovalAction,
   type ApprovalRequest,
 } from "./approval.ts";
 import { PermissionStore } from "./permission-store.ts";
 import { ApprovalPanel } from "./ApprovalPanel.tsx";
+import {
+  UpdateManager,
+  UpdateService,
+  formatUpdateCheckFailure,
+  formatUpdateFailure,
+  formatUpdateSuccess,
+  formatUpToDate,
+  formatVersionReport,
+  isNewerStableVersion,
+  readNotificationState,
+  shouldNotify,
+  writeNotificationState,
+  type AvailableUpdate,
+  type UpdateFailure,
+} from "./updater.ts";
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -352,6 +368,8 @@ function App() {
   const commandLimit = () => Math.max(1, Math.min(7, terminal().height - 20));
   const commands = [
     { command: "/help", description: "Show all commands" },
+    { command: "/update", description: "Check for and install the latest stable MINT release" },
+    { command: "/version", description: "Display the installed version and update status" },
     { command: "/models", description: "List NVIDIA models" },
     { command: "/model", description: "Choose a model (opens picker)" },
     { command: "/retry", description: "Retry the last user message" },
@@ -462,6 +480,39 @@ function App() {
   let pendingCommandProposal: { id: string; command: string; cwd: string; timeoutMs: number } | undefined;
   const approvalWaiters = new Map<string, (result: { ok: boolean; output: string; status: string }) => void>();
 
+  // Update checking is best-effort and never blocks startup, input, or the
+  // render loop. The manager captures the running version once so an installed
+  // update cannot make this process claim it is already running the new code.
+  const updateManager = new UpdateManager();
+  const updateService = new UpdateService(updateManager);
+  const [updateNotice, setUpdateNotice] = createSignal<{ current: string; latest: string } | null>(null);
+  const [pendingUpdateVersion, setPendingUpdateVersion] = createSignal<string | null>(null);
+  const [updateInstalling, setUpdateInstalling] = createSignal(false);
+  let updateCheckActive = false;
+  let updateDisposed = false;
+  let startupUpdateTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const runStartupUpdateCheck = async () => {
+    if (updateDisposed) return;
+    const installed = updateManager.installedVersion;
+    if (!installed) return;
+    try {
+      // The manager memoizes this call, so startup detection queries npm at
+      // most once per session. Failures are intentionally silent.
+      const result = await updateManager.startupCheck();
+      if (updateDisposed || !result.ok) return;
+      const latest = result.version;
+      if (!isNewerStableVersion(installed, latest)) return;
+      if (!shouldNotify(installed, latest, readNotificationState())) return;
+      setUpdateNotice({ current: installed, latest });
+      // Notification persistence is deliberately separate from .env, sessions,
+      // and provider configuration. A failure only means the banner may repeat.
+      writeNotificationState(latest);
+    } catch {
+      // Update checks are best-effort; startup must never fail because npm is down.
+    }
+  };
+
   const resolveApprovalWaiter = (requestId: string, result: { ok: boolean; output: string; status: string }) => {
     const resolve = approvalWaiters.get(requestId);
     if (!resolve) return;
@@ -512,6 +563,8 @@ function App() {
           output: reason === "cancelled" ? "Command approval cancelled." : "Command approval rejected.",
           status,
         });
+      } else if (req.details.kind === "update") {
+        // Nothing has been installed yet; dropping the confirmation is enough.
       }
     }
     pendingProposalDetails = undefined;
@@ -579,6 +632,7 @@ function App() {
     if (!auto && !isCurrent) return;
 
     if (request.details.kind === "file-apply") {
+      const proposalId = request.details.proposalId;
       if (!workspaceTools) return;
       if (action === "reject") {
         if (isCurrent) approvalQueue.resolveCurrent(request);
@@ -611,7 +665,7 @@ function App() {
           setMessages((old) => [...old, { role: "assistant", content: `Change not applied: ${result.error}` }]);
           setProposalStatus(request.details.proposalId, "apply failed · awaiting approval");
           // Re-enqueue same proposal if not already queued.
-          if (!approvalQueue.all().some((r) => r.details.kind === "file-apply" && r.details.proposalId === request.details.proposalId)) {
+          if (!approvalQueue.all().some((r) => r.details.kind === "file-apply" && r.details.proposalId === proposalId)) {
             enqueueApplyRequest(request.details.proposalId, {
               path: request.details.path,
               preview: request.details.preview,
@@ -626,6 +680,65 @@ function App() {
       } finally {
         setApprovalResolving(false);
         syncApprovalState();
+      }
+      return;
+    }
+
+    if (request.details.kind === "update") {
+      if (action === "cancel" || action === "reject") {
+        if (isCurrent) approvalQueue.resolveCurrent(request);
+        setMessages((old) => [...old, { role: "assistant", content: "Update cancelled. MINT was not changed." }]);
+        setNotice("update cancelled");
+        syncApprovalState();
+        return;
+      }
+      if (action !== "update") return;
+
+      setApprovalResolving(true);
+      setUpdateInstalling(true);
+      setBusy(true);
+      if (isCurrent) approvalQueue.resolveCurrent(request);
+      catEvent({ type: "modelThinking" });
+      setNotice(`installing MINT ${request.details.toVersion}…`);
+      try {
+        const check: AvailableUpdate = {
+          status: "available",
+          installed: request.details.fromVersion,
+          latest: request.details.toVersion,
+          command: request.details.command,
+        };
+        const outcome = await updateService.decide("update", check);
+        if (outcome.status === "success") {
+          setPendingUpdateVersion(outcome.newVersion);
+          setUpdateNotice(null);
+          setMessages((old) => [...old, { role: "assistant", content: formatUpdateSuccess(outcome.previousVersion, outcome.newVersion) }]);
+          setNotice("MINT updated · restart to use it");
+          catEvent({ type: "operationCompleted" });
+        } else if (outcome.status === "failure") {
+          setMessages((old) => [...old, { role: "assistant", content: formatUpdateFailure(outcome) }]);
+          setNotice("MINT update failed");
+          catEvent({ type: "operationFailed" });
+        } else {
+          setMessages((old) => [...old, { role: "assistant", content: "Update cancelled. MINT was not changed." }]);
+          setNotice("update cancelled");
+        }
+      } catch (error) {
+        const failure: UpdateFailure = {
+          status: "failure",
+          previousVersion: request.details.fromVersion,
+          targetVersion: request.details.toVersion,
+          kind: "failed",
+          error: error instanceof Error ? error.message : "Update failed.",
+        };
+        setMessages((old) => [...old, { role: "assistant", content: formatUpdateFailure(failure) }]);
+        setNotice("MINT update failed");
+        catEvent({ type: "operationFailed" });
+      } finally {
+        setUpdateInstalling(false);
+        setBusy(false);
+        setApprovalResolving(false);
+        syncApprovalState();
+        catEvent({ type: "sessionWaiting" });
       }
       return;
     }
@@ -691,7 +804,7 @@ function App() {
   const rejectCurrentApproval = () => {
     const current = approvalQueue.current();
     if (!current) return;
-    void resolveApprovalRequest(current, "reject");
+    void resolveApprovalRequest(current, current.details.kind === "update" ? "cancel" : "reject");
   };
   const store = new SessionStore();
   const catMapper = new StateMapper();
@@ -769,6 +882,8 @@ function App() {
     clipboardDispose = () => cb.dispose();
   });
   onCleanup(() => {
+    updateDisposed = true;
+    if (startupUpdateTimer) clearTimeout(startupUpdateTimer);
     if (clipboardDispose) clipboardDispose();
     if (toastTimer) clearTimeout(toastTimer);
   });
@@ -1928,8 +2043,85 @@ const showTokenUsage = () => terminal().width >= 48;
     if (text === "/help") {
       setMessages((old) => [...old, {
         role: "assistant",
-        content: "Commands: /help · /models · /model · /connect · /session · /session new · /session delete <id> · /session rename · /workspace · /project · /capabilities · /limits · /autoapply [on|off|status|save] · /ls [path] · /read <path> · /search <text> · /propose <path> · /apply · /approve · /reject · /command <program args> · /run · /reject-command · /cancel · /clear · /quit\n\nShortcuts: Ctrl+Y = approve pending proposal/command\nFile changes require explicit /apply approval (or enable auto-apply with /autoapply on). Terminal commands are restricted, previewed, and run only after explicit /run approval. Web browsing remains unavailable.",
+        content: "Commands: /help · /update · /version · /models · /model · /connect · /session · /session new · /session delete <id> · /session rename · /workspace · /project · /capabilities · /limits · /autoapply [on|off|status|save] · /ls [path] · /read <path> · /search <text> · /propose <path> · /apply · /approve · /reject · /command <program args> · /run · /reject-command · /cancel · /clear · /quit\n\nShortcuts: Ctrl+Y = approve pending proposal/command\nFile changes require explicit /apply approval (or enable auto-apply with /autoapply on). Terminal commands are restricted, previewed, and run only after explicit /run approval. /update checks npm and asks before installing the latest stable release; MINT must be restarted after a successful update. Web browsing remains unavailable.",
       }]);
+      return;
+    }
+    if (text === "/version") {
+      try {
+        if (!updateService.hasFreshCache()) {
+          setNotice("checking npm for the latest release…");
+          await updateService.checkForUpdate(false);
+        }
+        const summary = updateService.summary();
+        setMessages((old) => [...old, { role: "assistant", content: formatVersionReport(summary, pendingUpdateVersion()) }]);
+        setNotice(summary.status === "Unable to check" ? "version check unavailable" : summary.status === "Update available" ? "update available" : "MINT is up to date");
+      } catch (error) {
+        setMessages((old) => [...old, {
+          role: "assistant",
+          content: formatUpdateCheckFailure(
+            updateManager.installedVersion ?? "unknown",
+            error instanceof Error ? error.message : "Update check failed.",
+          ),
+        }]);
+        setNotice("version check unavailable");
+      }
+      return;
+    }
+    if (text === "/update") {
+      if (updateInstalling()) {
+        setMessages((old) => [...old, { role: "assistant", content: "An update is already in progress. Wait for npm to finish." }]);
+        return;
+      }
+      if (updateCheckActive) {
+        setMessages((old) => [...old, { role: "assistant", content: "An update check is already running." }]);
+        return;
+      }
+      if (approvalQueue.all().some((request) => request.details.kind === "update")) {
+        setMessages((old) => [...old, { role: "assistant", content: "An update confirmation is already open. Resolve it with Enter or Escape." }]);
+        return;
+      }
+
+      updateCheckActive = true;
+      setNotice("checking npm for the latest stable release…");
+      try {
+        const check = await updateService.checkForUpdate(true);
+        if (check.status === "unavailable") {
+          setMessages((old) => [...old, { role: "assistant", content: formatUpdateCheckFailure(check.installed, check.error) }]);
+          setNotice("update check failed");
+          return;
+        }
+        if (check.status === "up-to-date") {
+          setUpdateNotice(null);
+          setMessages((old) => [...old, { role: "assistant", content: formatUpToDate(check.installed, check.latest) }]);
+          setNotice("MINT is up to date");
+          return;
+        }
+
+        setMessages((old) => [...old, {
+          role: "assistant",
+          content: `MINT update available\n\nInstalled: ${check.installed}\nLatest:    ${check.latest}\n\nConfirm the update below to run:\n${check.command}`,
+        }]);
+        approvalQueue.enqueue(createUpdateRequest(++approvalSeq, {
+          kind: "update",
+          fromVersion: check.installed,
+          toVersion: check.latest,
+          command: check.command,
+        }));
+        syncApprovalState();
+        setNotice("confirm the update to continue");
+      } catch (error) {
+        setMessages((old) => [...old, {
+          role: "assistant",
+          content: formatUpdateCheckFailure(
+            updateManager.installedVersion ?? "unknown",
+            error instanceof Error ? error.message : "Update check failed.",
+          ),
+        }]);
+        setNotice("update check failed");
+      } finally {
+        updateCheckActive = false;
+      }
       return;
     }
     if (text === "/models" || text === "/model") {
@@ -2256,6 +2448,11 @@ const showTokenUsage = () => terminal().width >= 48;
   // state (idle, or a working state if work begins immediately).
   onMount(() => {
     catEvent({ type: "sessionStarted" });
+    // Wait for the first frame, then check npm in the background. This timer
+    // never blocks rendering, chat input, or the connection flow.
+    startupUpdateTimer = setTimeout(() => {
+      void runStartupUpdateCheck();
+    }, 75);
   });
 
   // Paste handler (terminal bracketed paste)
@@ -2380,6 +2577,10 @@ const showTokenUsage = () => terminal().width >= 48;
             });
             return;
           }
+        }
+        if (updateInstalling()) {
+          showToast("Update in progress; wait for npm to finish");
+          return;
         }
         if (activeController) {
           activeController.abort();
@@ -2763,6 +2964,27 @@ const showTokenUsage = () => terminal().width >= 48;
               </box>
             </Show>
           </box>
+          <Show when={updateNotice()}>
+            {(notice) => (
+              <box
+                flexDirection="row"
+                borderStyle="single"
+                borderColor={colors.peach}
+                backgroundColor={colors.panel}
+                paddingLeft={1}
+                paddingRight={1}
+                width="100%"
+                minWidth={0}
+                flexShrink={0}
+                overflow="hidden"
+              >
+                <text wrapMode="none" width="100%" minWidth={0} truncate={true}>
+                  <span style={{ fg: colors.peach }}>✨ MINT update available</span>
+                  <span style={{ fg: colors.muted }}>{` · ${notice().current} → ${notice().latest} · type /update`}</span>
+                </text>
+              </box>
+            )}
+          </Show>
           <scrollbox flexGrow={1} minHeight={0} minWidth={0} width="100%" contentOptions={{ flexDirection: "column", gap: 1 }} stickyScroll={true} stickyStart="bottom">
             <For each={messages()}>
               {(message, index) => {
