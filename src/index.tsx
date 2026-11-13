@@ -2849,10 +2849,27 @@ const showTokenUsage = () => terminal().width >= 48;
   };
 
   // Scroll helper for mouse wheel
-  const handleWheel = (event: { scroll?: { direction: "up" | "down" | "left" | "right"; delta: number } }, setter: (delta: number) => void) => {
+  type WheelEvent = {
+    scroll?: { direction: "up" | "down" | "left" | "right"; delta: number };
+    stopPropagation?: () => void;
+  };
+  const handleWheel = (event: WheelEvent, setter: (delta: number) => void) => {
     if (event.scroll) {
       const delta = event.scroll.direction === "up" ? -event.scroll.delta : event.scroll.direction === "down" ? event.scroll.delta : 0;
       if (delta !== 0) setter(delta);
+    }
+  };
+  const commandPaletteOpen = () => commandSuggestions().length > 0 && !modelPickerOpen() && !approvalCurrent();
+  const menuScrollActive = () => commandPaletteOpen() || modelPickerOpen();
+  const handleMenuWheel = (event: WheelEvent) => {
+    if (modelPickerOpen()) {
+      event.stopPropagation?.();
+      handleWheel(event, (d) => setModelPickerIndex(movePickerIndex(modelPickerIndex(), d, modelPickerSuggestions().length)));
+      return;
+    }
+    if (commandPaletteOpen()) {
+      event.stopPropagation?.();
+      handleWheel(event, (d) => setCommandIndex(movePickerIndex(commandIndex(), d, commandSuggestions().length)));
     }
   };
 
@@ -2901,50 +2918,55 @@ const showTokenUsage = () => terminal().width >= 48;
             oneShotSpeed={catPrefs?.oneShotSpeed ?? 1}
             colors={{ divider: colors.catLine, ascii: { transparent: "transparent", outline: colors.catLine, body: colors.lavender, light: colors.pink, eye: colors.peach } }}
           />
-          <scrollbox flexGrow={1} minHeight={0} width="100%" overflow="hidden" verticalScrollbarOptions={{ visible: false }}>
-            <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0}>
-              <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none">SESSIONS</text>
-              <For each={allSessions()}>
-                {(s) => (
-                  <box
-                    flexDirection="column"
-                    gap={0}
-                    width="100%"
-                    minWidth={0}
-                    paddingLeft={1}
-                    paddingRight={1}
-                    backgroundColor={session() === s.id ? colors.lavender : "transparent"}
-                    onMouseUp={() => { if (session() !== s.id) resumeSession(s.id); }}
-                  >
-                    <text
-                      fg={session() === s.id ? colors.bg : colors.text}
+          <box flexGrow={1} minHeight={0} width="100%" overflow="hidden">
+            <scrollbox flexGrow={1} minHeight={0} width="100%" overflow="hidden" verticalScrollbarOptions={{ visible: false }}>
+              <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0}>
+                <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none">SESSIONS</text>
+                <For each={allSessions()}>
+                  {(s) => (
+                    <box
+                      flexDirection="column"
+                      gap={0}
                       width="100%"
                       minWidth={0}
-                      wrapMode="none"
-                      truncate={true}
+                      paddingLeft={1}
+                      paddingRight={1}
+                      backgroundColor={session() === s.id ? colors.lavender : "transparent"}
+                      onMouseUp={() => { if (session() !== s.id) resumeSession(s.id); }}
                     >
-                      {(session() === s.id ? "❯ " : "  ") + (s.title || "unnamed")}
-                    </text>
-                    <text
-                      fg={session() === s.id ? colors.bg : colors.muted}
-                      width="100%"
-                      minWidth={0}
-                      wrapMode="none"
-                      truncate={true}
-                    >
-                      {displayModelName(s.model)} · {relativeTime(s.updated_at)}
-                    </text>
-                  </box>
-                )}
-              </For>
-              <Show when={allSessions().length === 0}>
-                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none">no sessions in this directory</text>
-              </Show>
-              <Show when={!session()}>
-                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none">draft · saved on first message</text>
-              </Show>
-            </box>
-          </scrollbox>
+                      <text
+                        fg={session() === s.id ? colors.bg : colors.text}
+                        width="100%"
+                        minWidth={0}
+                        wrapMode="none"
+                        truncate={true}
+                      >
+                        {(session() === s.id ? "❯ " : "  ") + (s.title || "unnamed")}
+                      </text>
+                      <text
+                        fg={session() === s.id ? colors.bg : colors.muted}
+                        width="100%"
+                        minWidth={0}
+                        wrapMode="none"
+                        truncate={true}
+                      >
+                        {displayModelName(s.model)} · {relativeTime(s.updated_at)}
+                      </text>
+                    </box>
+                  )}
+                </For>
+                <Show when={allSessions().length === 0}>
+                  <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none">no sessions in this directory</text>
+                </Show>
+                <Show when={!session()}>
+                  <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none">draft · saved on first message</text>
+                </Show>
+              </box>
+            </scrollbox>
+            <Show when={menuScrollActive()}>
+              <box position="absolute" top={0} left={0} width="100%" height="100%" zIndex={1} onMouseScroll={handleMenuWheel} />
+            </Show>
+          </box>
         </box>
       </Show>
 
@@ -2979,62 +3001,67 @@ const showTokenUsage = () => terminal().width >= 48;
               </box>
             )}
           </Show>
-          <scrollbox flexGrow={1} minHeight={0} minWidth={0} width="100%" contentOptions={{ flexDirection: "column", gap: 1 }} stickyScroll={true} stickyStart="bottom">
-            <For each={messages()}>
-              {(message, index) => {
-                const isStreamingRow = () => streamingActive() && index() === messages().length - 1 && message.role === "assistant" && !message.kind;
-                return (
-                <box flexDirection="column" gap={0} width="100%" minWidth={0}>
-                  {message.kind === "tool" ? (
-                    <box flexDirection="row" gap={1} width="100%" minWidth={0}>
-                      <text fg={colors.peach} wrapMode="none" flexShrink={0}>·</text>
-                      <text fg={colors.peach} wrapMode="none" flexShrink={0}>{message.meta?.name ?? ""}</text>
-                      <Show when={message.meta?.args}>
-                        <text fg={colors.lavender} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.meta!.args}</text>
-                      </Show>
-                    </box>
-                  ) : message.kind === "result" ? (
-                    <box flexDirection="row" gap={1} width="100%" minWidth={0} paddingLeft={1}>
-                      <text fg={colors.muted} wrapMode="none" flexShrink={0}>↳</text>
-                      <text fg={colors.muted} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.content}</text>
-                    </box>
-                  ) : message.kind === "proposal" ? (
-                    <ProposalCard message={message} />
-                  ) : message.kind === "approval" ? (
-                    <box flexDirection="row" gap={1} width="100%" minWidth={0}>
-                      <text fg={colors.peach} wrapMode="none" flexShrink={0}>·</text>
-                      <text fg={colors.peach} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.content}</text>
-                    </box>
-                  ) : message.kind === "mode" ? (
-                    <box flexDirection="row" gap={1} width="100%" minWidth={0} paddingLeft={1} paddingRight={1}>
-                      <text fg={message.meta?.mode === "plan" ? colors.pink : colors.mint} wrapMode="none" flexShrink={0}>●</text>
-                      <text fg={message.meta?.mode === "plan" ? colors.pink : colors.mint} wrapMode="none" flexGrow={1} minWidth={0}>{message.content}</text>
-                    </box>
-                  ) : (
-                    <>
-                      <text fg={message.role === "user" ? colors.mint : message.role === "system" ? colors.muted : colors.pink}>
-                        {message.role === "user" ? "you ❯" : "mint ♡ · answer"}
-                      </text>
-                      <box flexDirection="column" gap={0} width="100%" minWidth={0}>
-                        {isStreamingRow() ? (
-                          <Show when={streamingContent()} fallback={<text fg={colors.peach} wrapMode="word" width="100%">Waiting for the response…</text>}>
-                            <markdown content={streamingContent()} syntaxStyle={markdownStyle()} fg={colors.text} conceal={true} streaming={true} width="100%" minWidth={0} />
-                          </Show>
-                        ) : message.content
-                          ? parseMessageSegments(message.content).map((seg) => renderSegment(seg, colors, markdownStyle()))
-                          : busy()
-                            ? <text fg={colors.peach} wrapMode="word" width="100%">Waiting for the response…</text>
-                            : null
-                        }
+          <box flexGrow={1} minHeight={0} minWidth={0} width="100%" overflow="hidden">
+            <scrollbox flexGrow={1} minHeight={0} minWidth={0} width="100%" contentOptions={{ flexDirection: "column", gap: 1 }} stickyScroll={true} stickyStart="bottom">
+              <For each={messages()}>
+                {(message, index) => {
+                  const isStreamingRow = () => streamingActive() && index() === messages().length - 1 && message.role === "assistant" && !message.kind;
+                  return (
+                  <box flexDirection="column" gap={0} width="100%" minWidth={0}>
+                    {message.kind === "tool" ? (
+                      <box flexDirection="row" gap={1} width="100%" minWidth={0}>
+                        <text fg={colors.peach} wrapMode="none" flexShrink={0}>·</text>
+                        <text fg={colors.peach} wrapMode="none" flexShrink={0}>{message.meta?.name ?? ""}</text>
+                        <Show when={message.meta?.args}>
+                          <text fg={colors.lavender} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.meta!.args}</text>
+                        </Show>
                       </box>
-                    </>
-                  )}
-                </box>
-              );
-            }}
-          </For>
-          </scrollbox>
-          <Show when={commandSuggestions().length > 0 && !modelPickerOpen() && !approvalCurrent()}>
+                    ) : message.kind === "result" ? (
+                      <box flexDirection="row" gap={1} width="100%" minWidth={0} paddingLeft={1}>
+                        <text fg={colors.muted} wrapMode="none" flexShrink={0}>↳</text>
+                        <text fg={colors.muted} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.content}</text>
+                      </box>
+                    ) : message.kind === "proposal" ? (
+                      <ProposalCard message={message} />
+                    ) : message.kind === "approval" ? (
+                      <box flexDirection="row" gap={1} width="100%" minWidth={0}>
+                        <text fg={colors.peach} wrapMode="none" flexShrink={0}>·</text>
+                        <text fg={colors.peach} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.content}</text>
+                      </box>
+                    ) : message.kind === "mode" ? (
+                      <box flexDirection="row" gap={1} width="100%" minWidth={0} paddingLeft={1} paddingRight={1}>
+                        <text fg={message.meta?.mode === "plan" ? colors.pink : colors.mint} wrapMode="none" flexShrink={0}>●</text>
+                        <text fg={message.meta?.mode === "plan" ? colors.pink : colors.mint} wrapMode="none" flexGrow={1} minWidth={0}>{message.content}</text>
+                      </box>
+                    ) : (
+                      <>
+                        <text fg={message.role === "user" ? colors.mint : message.role === "system" ? colors.muted : colors.pink}>
+                          {message.role === "user" ? "you ❯" : "mint ♡ · answer"}
+                        </text>
+                        <box flexDirection="column" gap={0} width="100%" minWidth={0}>
+                          {isStreamingRow() ? (
+                            <Show when={streamingContent()} fallback={<text fg={colors.peach} wrapMode="word" width="100%">Waiting for the response…</text>}>
+                              <markdown content={streamingContent()} syntaxStyle={markdownStyle()} fg={colors.text} conceal={true} streaming={true} width="100%" minWidth={0} />
+                            </Show>
+                          ) : message.content
+                            ? parseMessageSegments(message.content).map((seg) => renderSegment(seg, colors, markdownStyle()))
+                            : busy()
+                              ? <text fg={colors.peach} wrapMode="word" width="100%">Waiting for the response…</text>
+                              : null
+                          }
+                        </box>
+                      </>
+                    )}
+                  </box>
+                );
+              }}
+            </For>
+            </scrollbox>
+            <Show when={menuScrollActive()}>
+              <box position="absolute" top={0} left={0} width="100%" height="100%" zIndex={1} onMouseScroll={handleMenuWheel} />
+            </Show>
+          </box>
+          <Show when={commandPaletteOpen()}>
             <box backgroundColor={colors.bg} borderStyle="single" borderColor={colors.lavender} padding={1} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden" onMouseScroll={(e) => handleWheel(e, (d) => setCommandIndex(movePickerIndex(commandIndex(), d, commandSuggestions().length)))}>
               <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
                 <text fg={colors.lavender} wrapMode="none" width="100%" minWidth={0} truncate={true}>{commandPaletteHeader()}</text>
