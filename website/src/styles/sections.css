@@ -1,6 +1,6 @@
-﻿/* Hallmark · redesign: full · shape: custom portfolio · theme: maintained palette · hero: stage · nav: edge-aligned · footer: mast+cta · v2.0.0
- * pre-emit critique: P4 H5 E4 S4 R4 V4 · weakest: E, preserved all demo wiring and color tokens while recomposing layout
- * redesign: full · scope: page · copy: tightened labels, content kept
+/* Hallmark Â· redesign: full Â· shape: custom portfolio Â· theme: maintained palette Â· hero: stage Â· nav: edge-aligned Â· footer: mast+cta Â· v2.0.0
+ * pre-emit critique: P4 H5 E4 S4 R4 V4 Â· weakest: E, preserved all demo wiring and color tokens while recomposing layout
+ * redesign: full Â· scope: page Â· copy: tightened labels, content kept
  */
 .hero-specimen {
   position: relative;
@@ -512,7 +512,7 @@
   }
 }
 
-/* â”€â”€ Loop scene â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Ã¢â€â‚¬Ã¢â€â‚¬ Loop scene Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
 
 .loop-steps {
   display: grid;
@@ -597,6 +597,23 @@
   opacity: 1;
 }
 
+.loop-pin.is-waiting .loop-wait .status-dot {
+  box-shadow: 0 0 0 0 rgba(250, 179, 135, 0.45);
+  animation: loop-wait-pulse 1.8s var(--ease-out) infinite;
+}
+
+@keyframes loop-wait-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(250, 179, 135, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(250, 179, 135, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(250, 179, 135, 0);
+  }
+}
+
 .loop-svg {
   width: 100%;
   height: auto;
@@ -623,24 +640,36 @@
 }
 
 .loop-node {
-  opacity: 0.58;
-  transition: opacity 360ms var(--ease-out);
+  opacity: 0.48;
+  transition: opacity 260ms var(--ease-out), filter 260ms var(--ease-out);
+}
+
+.loop-node .node-card {
+  fill: rgba(36, 36, 56, 0.98);
+  stroke: rgba(60, 60, 80, 0.95);
+  stroke-width: 1.2;
+  transition:
+    fill 260ms var(--ease-out),
+    stroke 260ms var(--ease-out),
+    filter 260ms var(--ease-out);
+}
+
+.loop-node .node-accent {
+  fill: rgba(147, 153, 178, 0.35);
+  stroke: none;
+  transition: fill 260ms var(--ease-out), opacity 260ms var(--ease-out);
 }
 
 .loop-node rect {
-  fill: var(--terminal-panel);
-  stroke: var(--terminal-rule);
-  stroke-width: 1;
-  transition:
-    fill 360ms var(--ease-out),
-    stroke 360ms var(--ease-out);
+  vector-effect: non-scaling-stroke;
 }
 
 .loop-node .node-kicker {
   fill: var(--terminal-muted);
   font-family: var(--font-mono);
-  font-size: 12.5px;
-  letter-spacing: 0.06em;
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .loop-node .node-label {
@@ -652,34 +681,57 @@
 .loop-node .node-gate {
   fill: var(--terminal-peach);
   font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.05em;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .loop-node.is-active {
   opacity: 1;
+  filter: drop-shadow(0 0 10px rgba(166, 227, 161, 0.16));
 }
 
 .loop-node.is-active rect {
-  fill: rgba(166, 227, 161, 0.05);
+  fill: rgba(166, 227, 161, 0.1);
   stroke: var(--terminal-mint);
 }
 
-.loop-node--gate rect {
-  stroke: rgba(250, 179, 135, 0.55);
+.loop-node--gate .node-card {
+  stroke: rgba(250, 179, 135, 0.65);
 }
 
-.loop-node--gate.is-active rect {
-  fill: rgba(250, 179, 135, 0.06);
+.loop-node--gate .node-accent {
+  fill: rgba(250, 179, 135, 0.5);
+}
+
+.loop-node--gate.is-active {
+  filter: drop-shadow(0 0 12px rgba(250, 179, 135, 0.18));
+}
+
+.loop-node--gate.is-active .node-card {
+  fill: rgba(250, 179, 135, 0.1);
   stroke: var(--terminal-peach);
+}
+
+.loop-node--gate.is-active .node-accent {
+  fill: var(--terminal-peach);
+}
+
+.loop-node--gate.is-waiting {
+  filter: drop-shadow(0 0 16px rgba(250, 179, 135, 0.22));
 }
 
 .loop-pulse {
   fill: var(--terminal-mint);
   stroke: var(--terminal);
-  stroke-width: 2;
+  stroke-width: 2.5;
   filter: url("#loop-glow");
   opacity: 0;
+  transition: opacity 120ms var(--ease-out);
+}
+
+.loop-pulse.is-live {
+  opacity: 1;
 }
 
 .loop-legend {
@@ -709,7 +761,52 @@
   margin-top: 12px;
 }
 
-/* â”€â”€ Read scene â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.loop-pin.is-waiting .loop-pulse.is-live {
+  fill: var(--terminal-peach);
+  filter: url("#loop-glow");
+}
+
+.loop-flow-hints path {
+  opacity: 0.9;
+}
+
+.loop-frame text {
+  user-select: none;
+}
+
+.loop-node.is-active .node-kicker {
+  fill: rgba(166, 227, 161, 0.92);
+}
+
+.loop-node--gate.is-active .node-kicker,
+.loop-node--gate.is-waiting .node-kicker {
+  fill: rgba(250, 179, 135, 0.95);
+}
+
+.loop-node--gate.is-active .node-label,
+.loop-node--gate.is-waiting .node-label {
+  fill: var(--terminal-text);
+}
+
+.loop-visual {
+  position: relative;
+  padding: clamp(14px, 2vw, 22px);
+  border: 1px solid rgba(60, 60, 80, 0.7);
+  background:
+    radial-gradient(circle at 20% 10%, rgba(166, 227, 161, 0.08), transparent 28%),
+    radial-gradient(circle at 80% 90%, rgba(250, 179, 135, 0.08), transparent 24%),
+    rgba(30, 30, 46, 0.35);
+}
+
+.loop-visual .loop-svg {
+  display: block;
+}
+
+.loop-legend {
+  margin-top: 14px;
+}
+
+/* Ã¢â€â‚¬Ã¢â€â‚¬ Read scene Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
 
 .read-copy {
   display: grid;
@@ -989,7 +1086,7 @@
   font-size: 9px;
 }
 
-/* â”€â”€ Approval scene â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Ã¢â€â‚¬Ã¢â€â‚¬ Approval scene Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
 
 .approval-checks {
   display: grid;
@@ -1368,7 +1465,7 @@
   background: var(--terminal-add-bg);
 }
 
-/* â”€â”€ Command demo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Ã¢â€â‚¬Ã¢â€â‚¬ Command demo Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
 
 .command-card {
   overflow: hidden;
@@ -1396,7 +1493,7 @@
 }
 
 .command-head::before {
-  content: "â”ƒ";
+  content: "Ã¢â€Æ’";
   position: absolute;
   left: 9px;
   color: var(--terminal-yellow);
@@ -1424,7 +1521,7 @@
 }
 
 .command-line::before {
-  content: "â”ƒ";
+  content: "Ã¢â€Æ’";
   margin-left: -12px;
   color: var(--terminal-yellow);
 }
@@ -1571,7 +1668,7 @@
   font-size: inherit;
 }
 
-/* â”€â”€ Sessions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Ã¢â€â‚¬Ã¢â€â‚¬ Sessions Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
 
 .session-copy {
   display: grid;
@@ -1736,7 +1833,7 @@
   color: var(--mint);
 }
 
-/* â”€â”€ Cat â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Ã¢â€â‚¬Ã¢â€â‚¬ Cat Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
 
 .cat-copy {
   display: grid;
@@ -1882,7 +1979,7 @@
 }
 
 .cat-canvas-wrap[data-mood="love"]::after {
-  content: "â™¥  â™¥  â™¥";
+  content: "Ã¢â„¢Â¥  Ã¢â„¢Â¥  Ã¢â„¢Â¥";
   top: 12%;
   left: 50%;
   color: var(--terminal-pink);
@@ -1894,7 +1991,7 @@
 }
 
 .cat-canvas-wrap[data-mood="wizard"]::after {
-  content: "âœ¦  âœ¦";
+  content: "Ã¢Å“Â¦  Ã¢Å“Â¦";
   top: 13%;
   right: 16%;
   color: var(--terminal-lavender);
@@ -2201,7 +2298,7 @@
   line-height: 1.45;
 }
 
-/* â”€â”€ Limits â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Ã¢â€â‚¬Ã¢â€â‚¬ Limits Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
 
 .ledger {
   display: grid;
@@ -2253,7 +2350,7 @@
 }
 
 .ledger li::before {
-  content: "Â·";
+  content: "Ã‚Â·";
   position: absolute;
   left: 0;
   color: var(--mint);
@@ -2313,7 +2410,7 @@
   letter-spacing: 0.05em;
 }
 
-/* â”€â”€ Install â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Ã¢â€â‚¬Ã¢â€â‚¬ Install Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
 
 .install-copy {
   display: grid;
@@ -2489,7 +2586,7 @@
   color: var(--terminal-mint);
 }
 
-/* â”€â”€ Responsive details â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Ã¢â€â‚¬Ã¢â€â‚¬ Responsive details Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ */
 
 @media (max-width: 980px) {
   .read-specimen {

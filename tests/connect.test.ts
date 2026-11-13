@@ -8,6 +8,7 @@ import {
   validateConnectDraft,
   maskSecret,
   nextConnectField,
+  pasteDestination,
   resolveConnectModel,
   MAX_PASTE_CHARS,
 } from "../src/connect";
@@ -250,6 +251,21 @@ describe("connect helpers", () => {
       expect(nextConnectField("apiKey", true)).toBe("model");
       expect(nextConnectField("model", true)).toBe("baseUrl");
       expect(nextConnectField("baseUrl", true)).toBe("apiKey");
+    });
+  });
+
+  describe("pasteDestination", () => {
+    test("routes bracketed paste into the connect popup", () => {
+      expect(pasteDestination(true, false)).toBe("connect");
+    });
+
+    test("routes paste to the chat input when no popup is open", () => {
+      expect(pasteDestination(false, false)).toBe("chat");
+    });
+
+    test("swallows paste while the session picker is open", () => {
+      expect(pasteDestination(false, true)).toBe("none");
+      expect(pasteDestination(true, true)).toBe("none");
     });
   });
 

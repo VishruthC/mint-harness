@@ -25,6 +25,7 @@ import {
   validateConnectDraft,
   maskSecret,
   nextConnectField,
+  pasteDestination,
   resolveConnectModel,
   type ConnectField,
 } from "./connect";
@@ -2457,9 +2458,19 @@ const showTokenUsage = () => terminal().width >= 48;
 
   // Paste handler (terminal bracketed paste)
   usePaste((event) => {
-    if (sessionPickerOpen() || connectOpen()) return;
+    const destination = pasteDestination(connectOpen(), sessionPickerOpen());
+    if (destination === "none") return;
+    const pasted = decodePasteBytes(event.bytes);
+    // Terminal bracketed paste bypasses key handlers, so route it to the
+    // connect field explicitly. Ctrl+V / Shift+Insert are handled separately
+    // in handleConnectKey via the clipboard API.
+    if (destination === "connect") {
+      pasteEventCounter++;
+      void handleConnectPaste(pasted);
+      return;
+    }
     pasteEventCounter++;
-    const text = stripAnsiSequences(decodePasteBytes(event.bytes));
+    const text = stripAnsiSequences(pasted);
     const { text: sanitized, truncated } = sanitizePastedText(text);
     if (!sanitized) return;
     const { value: newValue, cursor: newCursor } = insertAtCursor(input(), cursorPos(), sanitized);

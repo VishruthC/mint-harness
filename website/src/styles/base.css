@@ -325,6 +325,12 @@ mark {
   margin-left: auto;
 }
 
+@media (max-width: 640px) {
+  .specimen-caption .text-button {
+    margin-left: 0;
+  }
+}
+
 .specimen-caption--dark {
   border-color: var(--terminal-rule);
   color: var(--terminal-muted);

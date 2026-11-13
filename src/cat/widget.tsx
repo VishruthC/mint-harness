@@ -16,6 +16,13 @@ import { createEffect, createMemo, createSignal, onCleanup, Show, untrack } from
 import { useRenderer } from "@opentui/solid";
 import { NativeImage } from "@opentui/core";
 import { effectiveAnimation, framePath, loadPack, type LoadedPack } from "./manifest.ts";
+import {
+  findSubjectBox,
+  planFrameCrop,
+  relativeSubjectBox,
+  unionSubjectBoxes,
+  type RelativeBox,
+} from "./frame-crop.ts";
 import { animationFps, frameAt, frameAtTransition } from "./animator.ts";
 import { decideRenderer } from "./terminal-detection.ts";
 import type { CatActivity } from "./state-mapper.ts";
@@ -118,36 +125,114 @@ export function CatCompanion(props: CatCompanionProps) {
   // per instance makes cleanup safe and avoids disposing images another widget
   // may still be showing.
   const images = new Map<string, LoadedImage>();
-  const pending = new Map<string, Promise<LoadedImage | undefined>>();
+  const frameBoxes = new Map<string, RelativeBox>();
+  const pendingGroups = new Map<string, Promise<void>>();
 
-  // Decode at most once per path. The in-flight map deduplicates the animation
-  // effect, the prefetcher, and rapid state changes that ask for the same
-  // frame before its read/decode has finished.
-  const ensureImage = (path: string): Promise<LoadedImage | undefined> => {
-    const cached = images.get(path);
-    if (cached) return Promise.resolve(cached);
-    const inFlight = pending.get(path);
-    if (inFlight) return inFlight;
-    const task = (async () => {
-      try {
-        const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
-        if (disposed) return undefined;
-        const image = NativeImage.decode(bytes);
-        if (disposed) {
-          image.dispose();
-          return undefined;
-        }
-        const loaded: LoadedImage = { path, image };
-        images.set(path, loaded);
-        return loaded;
-      } catch {
-        // Missing/unreadable frame: keep the nearest valid frame on screen.
+  interface DecodedFrame {
+    path: string;
+    image: NativeImage;
+    box: RelativeBox;
+  }
+
+  const decodeFrame = async (path: string): Promise<DecodedFrame | undefined> => {
+    try {
+      const bytes = new Uint8Array(await Bun.file(path).arrayBuffer());
+      if (disposed) return undefined;
+      const image = NativeImage.decode(bytes);
+      if (disposed) {
+        image.dispose();
         return undefined;
-      } finally {
-        pending.delete(path);
       }
-    })();
-    pending.set(path, task);
+      let box: RelativeBox = { minX: 0, minY: 0, maxX: 1, maxY: 1 };
+      try {
+        const raw = image.raw("rgba8");
+        const subject = findSubjectBox(raw.data, raw.width, raw.height, raw.stride);
+        if (subject) box = relativeSubjectBox(subject, raw.width, raw.height);
+      } catch {
+        // Keep the full canvas if pixel inspection is unavailable.
+      }
+      return { path, image, box };
+    } catch {
+      // Missing/unreadable frame: keep the nearest valid frame on screen.
+      return undefined;
+    }
+  };
+
+  /**
+   * Crop the state's shared subject box and pad it to a square with
+   * transparency. Using one union box for every frame in the animation avoids
+   * the cat pulsing in size between frames while still reclaiming the large
+   * baked-in margins in shipped artwork.
+   */
+  const normalizeFrame = (frame: DecodedFrame, union: RelativeBox): NativeImage => {
+    const plan = planFrameCrop(union, frame.image.width, frame.image.height);
+    let work = frame.image;
+    const { extract, extend, resizeSide } = plan;
+    const needsExtract =
+      extract.left !== 0 ||
+      extract.top !== 0 ||
+      extract.width !== work.width ||
+      extract.height !== work.height;
+    if (needsExtract) {
+      const next = work.extract(extract);
+      if (next !== work) {
+        work.dispose();
+        work = next;
+      }
+    }
+    if (extend.top || extend.right || extend.bottom || extend.left) {
+      const next = work.extend({ ...extend, background: [0, 0, 0, 0] });
+      if (next !== work) {
+        work.dispose();
+        work = next;
+      }
+    }
+    if (resizeSide > 0) {
+      const next = work.resize({ width: resizeSide, height: resizeSide, kernel: "area" });
+      if (next !== work) {
+        work.dispose();
+        work = next;
+      }
+    }
+    return work;
+  };
+
+  // Decode and normalize a state's frames together so they share one crop.
+  // The group key also deduplicates requests from the animation effect and the
+  // prefetcher when both ask for the same state before its frames are ready.
+  const ensureGroup = (paths: string[]): Promise<void> => {
+    const valid = [...new Set(paths.filter(Boolean))];
+    if (valid.length === 0) return Promise.resolve();
+    if (valid.every((path) => images.has(path))) return Promise.resolve();
+    const key = valid.join("\n");
+    const inFlight = pendingGroups.get(key);
+    if (inFlight) return inFlight;
+
+    const task = (async () => {
+      const loaded = (
+        await Promise.all(valid.filter((path) => !images.has(path)).map(decodeFrame))
+      ).filter((frame): frame is DecodedFrame => frame !== undefined);
+      if (disposed) {
+        for (const frame of loaded) frame.image.dispose();
+        return;
+      }
+      const cachedBoxes = valid
+        .filter((path) => images.has(path))
+        .map((path) => frameBoxes.get(path))
+        .filter((box): box is RelativeBox => box !== undefined);
+      const union = unionSubjectBoxes([...cachedBoxes, ...loaded.map((frame) => frame.box)]);
+      for (const frame of loaded) {
+        if (disposed) {
+          frame.image.dispose();
+          continue;
+        }
+        const image = normalizeFrame(frame, union);
+        images.set(frame.path, { path: frame.path, image });
+        frameBoxes.set(frame.path, frame.box);
+      }
+    })().finally(() => pendingGroups.delete(key));
+
+    pendingGroups.set(key, task);
     return task;
   };
 
@@ -255,10 +340,11 @@ export function CatCompanion(props: CatCompanionProps) {
   });
 
   // This effect is keyed by the selected path, not by the clock. It runs at
-  // most once per visible frame, and `ensureImage` prevents a slow decode from
+  // most once per visible frame, and `ensureGroup` prevents a slow decode from
   // being started again on every tick.
   createEffect(() => {
-    const path = selection().path;
+    const selected = selection();
+    const path = selected.path;
     if (!path || !imageAvailable()) {
       setCurrent(undefined);
       return;
@@ -269,28 +355,24 @@ export function CatCompanion(props: CatCompanionProps) {
       return;
     }
     // Keep the previous frame visible until this one is ready.
-    void ensureImage(path).then((loaded) => {
+    const paths = playback()[selected.state].paths;
+    void ensureGroup(paths).then(() => {
       // A late decode must never rewind the loop to a frame the state has
       // already moved past.
-      if (loaded && selection().path === path) setCurrent(loaded);
+      if (!disposed && selection().path === path) setCurrent(images.get(path));
     });
   });
 
-  // Warm the current (or incoming) state's frames one at a time. This makes
-  // the first pass through a loop as smooth as later passes without decoding
+  // Warm the current (or incoming) state's frames together. This makes the
+  // first pass through a loop as smooth as later passes without decoding
   // every pack upfront or adding a second timer.
   const prefetchState = createMemo(() => transition()?.toState ?? selection().state);
   createEffect(() => {
     const state = prefetchState();
     if (!imageAvailable()) return;
     const paths = playback()[state].paths;
-    if (paths.length < 2) return;
-    void (async () => {
-      for (const path of paths) {
-        if (!path || disposed || prefetchState() !== state) break;
-        await ensureImage(path);
-      }
-    })();
+    if (paths.length === 0) return;
+    void ensureGroup(paths);
   });
 
   onCleanup(() => {
@@ -299,7 +381,8 @@ export function CatCompanion(props: CatCompanionProps) {
       try { loaded.image.dispose(); } catch { /* already released */ }
     }
     images.clear();
-    pending.clear();
+    frameBoxes.clear();
+    pendingGroups.clear();
   });
 
   const rows = createMemo((): number => {
@@ -307,7 +390,12 @@ export function CatCompanion(props: CatCompanionProps) {
     // Keep one row for the divider and never exceed the caller's height
     // budget. Very short terminals get a smaller cat rather than clipped rows.
     const maxRows = Math.max(1, budget - 1);
-    return Math.max(1, Math.min(maxRows, Math.round(14 * props.scale)));
+    // Terminal cells are roughly twice as tall as they are wide, so a square
+    // frame uses half as many rows as columns. This lets the cat use a wide
+    // sidebar instead of being clamped to a small fixed height.
+    const fullWidthRows = Math.max(1, Math.round(props.width / 2));
+    const scaled = Math.max(1, Math.round(fullWidthRows * props.scale));
+    return Math.max(1, Math.min(maxRows, scaled));
   });
 
   const imageWidth = createMemo(() => Math.max(1, Math.min(props.width, Math.round(rows() * 2))));

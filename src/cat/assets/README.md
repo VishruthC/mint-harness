@@ -33,9 +33,10 @@ manifest is **relative to its pack directory** — never to your workspace, so
 
 `manifest.json` declares `dimensions: { width, height }` (the shipped canvas is
 `128 × 128`). New frames should match that canvas; `bun run cat:assets --check`
-reports mismatches. Existing frames may differ in size — the renderer fits them
-into the cat box without stretching or cropping, so deliberate legacy artwork
-keeps working.
+reports mismatches. Existing frames may differ in size — the renderer trims
+uniform or transparent outer margins in memory, pads the subject to a square,
+and fits that into the cat box without stretching. Cropping never modifies your
+files, and all frames in an animation share one crop box so poses stay stable.
 
 ## 3. Transparency requirements
 

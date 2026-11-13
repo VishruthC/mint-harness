@@ -967,7 +967,8 @@
 
   .hero {
     min-height: auto;
-    padding-top: calc(var(--header-h) + 52px);
+    padding-top: calc(var(--header-h) + 40px);
+    padding-bottom: 40px;
   }
 
   .hero-stage,
@@ -981,8 +982,23 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .chapter-head--split {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+
+  .chapter-head--split .chapter-kicker {
+    justify-self: start;
+    max-width: 60ch;
+  }
+
   .hero-intro {
-    max-width: 760px;
+    max-width: 720px;
+  }
+
+  .hero-install {
+    width: min(100%, 560px);
   }
 
   .hero-specimen {
@@ -996,7 +1012,7 @@
   .loop-pin,
   .approval-pin {
     min-height: auto;
-    padding-block: 80px;
+    padding-block: 72px;
   }
 
   .limits-grid {
@@ -1021,12 +1037,27 @@
     display: none;
   }
 
+  .hero {
+    padding-top: calc(var(--header-h) + 32px);
+  }
+
   .hero-title {
-    font-size: clamp(3rem, 13vw, 4.8rem);
+    font-size: clamp(2.8rem, 13vw, 4.4rem);
+  }
+
+  .hero-lede,
+  .hero-install,
+  .hero-meta {
+    max-width: 100%;
   }
 
   .hero-meta {
     grid-template-columns: 1fr;
+  }
+
+  .chapter-head--split {
+    gap: 14px;
+    margin-bottom: 34px;
   }
 
   .install-band-reqs {
@@ -1034,12 +1065,12 @@
   }
 
   .chapter {
-    padding-block: 72px;
+    padding-block: 64px;
   }
 
   .loop-pin,
   .approval-pin {
-    padding-block: 72px;
+    padding-block: 64px;
   }
 
   .footer-grid {

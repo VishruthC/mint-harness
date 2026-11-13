@@ -410,7 +410,7 @@ minth</code></pre>
                 role="img"
                 aria-labelledby="loop-title loop-desc"
               >
-                <title id="loop-title">One MINT turn, drawn as a circuit trace.</title>
+                <title id="loop-title">One MINT turn as an approval-gated loop.</title>
                 <desc id="loop-desc">
                   A path runs from you through the capability registry, NVIDIA NIM, a tool call,
                   an approval gate, the workspace, and back to you. The pulse pauses at the gate
@@ -418,18 +418,37 @@ minth</code></pre>
                 </desc>
                 <defs>
                   <pattern id="loop-grid" width="32" height="32" patternUnits="userSpaceOnUse">
-                    <path d="M 32 0 L 0 0 0 32" fill="none" stroke="rgba(205,214,244,0.06)" stroke-width="1" />
+                    <path d="M 32 0 L 0 0 0 32" fill="none" stroke="rgba(205,214,244,0.05)" stroke-width="1" />
                   </pattern>
-                  <filter id="loop-glow" x="-200%" y="-200%" width="400%" height="400%">
-                    <feGaussianBlur stdDeviation="5" result="blur" />
+                  <filter id="loop-glow" x="-240%" y="-240%" width="580%" height="580%">
+                    <feGaussianBlur stdDeviation="6.5" result="blur" />
+                    <feColorMatrix
+                      in="blur"
+                      type="matrix"
+                      values="1 0 0 0 0
+                              0 1 0 0 0
+                              0 0 1 0 0
+                              0 0 0 0.9 0"
+                      result="glow"
+                    />
                     <feMerge>
-                      <feMergeNode in="blur" />
+                      <feMergeNode in="glow" />
                       <feMergeNode in="SourceGraphic" />
                     </feMerge>
                   </filter>
+                  <marker id="loop-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(205,214,244,0.28)" />
+                  </marker>
                 </defs>
 
-                <rect width="760" height="640" fill="url(#loop-grid)" />
+                <rect x="0" y="0" width="760" height="640" rx="2" fill="rgba(30,30,46,0.18)" />
+                <rect x="0" y="0" width="760" height="640" fill="url(#loop-grid)" />
+
+                <g class="loop-frame" aria-hidden="true">
+                  <path d="M 30 44 L 730 44" stroke="rgba(205,214,244,0.12)" stroke-width="1" />
+                  <text x="30" y="28" fill="rgba(147,153,178,0.95)" font-family="var(--font-mono)" font-size="11" letter-spacing="0.12em">TURN TRACE</text>
+                  <text x="730" y="28" text-anchor="end" fill="rgba(166,227,161,0.9)" font-family="var(--font-mono)" font-size="11" letter-spacing="0.08em">READS FREE · WRITES GATED</text>
+                </g>
 
                 <path
                   class="trace-base"
@@ -441,50 +460,65 @@ minth</code></pre>
                   d="M 100 560 L 100 400 L 340 400 L 580 400 L 580 220 L 340 220 L 100 220 L 100 560"
                 />
 
+                <g class="loop-flow-hints" aria-hidden="true">
+                  <path d="M 124 400 L 316 400" stroke="rgba(205,214,244,0.16)" stroke-width="1.2" marker-end="url(#loop-arrow)" />
+                  <path d="M 364 400 L 556 400" stroke="rgba(205,214,244,0.16)" stroke-width="1.2" marker-end="url(#loop-arrow)" />
+                  <path d="M 580 376 L 580 244" stroke="rgba(205,214,244,0.16)" stroke-width="1.2" marker-end="url(#loop-arrow)" />
+                  <path d="M 556 220 L 364 220" stroke="rgba(205,214,244,0.16)" stroke-width="1.2" marker-end="url(#loop-arrow)" />
+                  <path d="M 316 220 L 124 220" stroke="rgba(205,214,244,0.16)" stroke-width="1.2" marker-end="url(#loop-arrow)" />
+                </g>
+
                 <g class="loop-node" data-node data-at="0.0" transform="translate(100 560)">
-                  <rect x="-66" y="-27" width="132" height="54" rx="2" />
-                  <text class="node-kicker" x="-52" y="-6">00 / you</text>
-                  <text class="node-label" x="-52" y="14">the prompt</text>
+                  <rect class="node-card" x="-72" y="-30" width="144" height="60" rx="2" />
+                  <rect class="node-accent" x="-72" y="-30" width="4" height="60" rx="2" />
+                  <text class="node-kicker" x="-56" y="-8">00 / you</text>
+                  <text class="node-label" x="-56" y="14">the prompt</text>
                 </g>
 
                 <g class="loop-node" data-node data-at="0.098" transform="translate(100 400)">
-                  <rect x="-76" y="-30" width="152" height="60" rx="2" />
-                  <text class="node-kicker" x="-62" y="-8">01 / registry</text>
-                  <text class="node-label" x="-62" y="12">capabilities</text>
+                  <rect class="node-card" x="-84" y="-33" width="168" height="66" rx="2" />
+                  <rect class="node-accent" x="-84" y="-33" width="4" height="66" rx="2" />
+                  <text class="node-kicker" x="-68" y="-10">01 / registry</text>
+                  <text class="node-label" x="-68" y="12">capabilities</text>
                 </g>
 
                 <g class="loop-node" data-node data-at="0.244" transform="translate(340 400)">
-                  <rect x="-72" y="-30" width="144" height="60" rx="2" />
-                  <text class="node-kicker" x="-58" y="-8">02 / NVIDIA NIM</text>
-                  <text class="node-label" x="-58" y="12">stream + tools</text>
+                  <rect class="node-card" x="-84" y="-33" width="168" height="66" rx="2" />
+                  <rect class="node-accent" x="-84" y="-33" width="4" height="66" rx="2" />
+                  <text class="node-kicker" x="-68" y="-10">02 / NVIDIA NIM</text>
+                  <text class="node-label" x="-68" y="12">stream + tools</text>
                 </g>
 
                 <g class="loop-node" data-node data-at="0.39" transform="translate(580 400)">
-                  <rect x="-76" y="-30" width="152" height="60" rx="2" />
-                  <text class="node-kicker" x="-62" y="-8">03 / tool call</text>
-                  <text class="node-label" x="-62" y="12">read or propose</text>
+                  <rect class="node-card" x="-86" y="-33" width="172" height="66" rx="2" />
+                  <rect class="node-accent" x="-86" y="-33" width="4" height="66" rx="2" />
+                  <text class="node-kicker" x="-70" y="-10">03 / tool call</text>
+                  <text class="node-label" x="-70" y="12">read or propose</text>
                 </g>
 
                 <g class="loop-node loop-node--gate" data-node data-at="0.5" transform="translate(580 220)">
-                  <rect x="-78" y="-34" width="156" height="68" rx="2" />
-                  <text class="node-kicker" x="-64" y="-11">04 / approval</text>
-                  <text class="node-label" x="-64" y="10">you type /apply</text>
-                  <text class="node-gate" x="-64" y="26">or /run</text>
+                  <rect class="node-card" x="-94" y="-40" width="188" height="80" rx="2" />
+                  <rect class="node-accent" x="-94" y="-40" width="4" height="80" rx="2" />
+                  <text class="node-kicker" x="-78" y="-14">04 / approval gate</text>
+                  <text class="node-label" x="-78" y="8">you decide</text>
+                  <text class="node-gate" x="-78" y="27">/apply · /run only</text>
                 </g>
 
                 <g class="loop-node" data-node data-at="0.646" transform="translate(340 220)">
-                  <rect x="-76" y="-30" width="152" height="60" rx="2" />
-                  <text class="node-kicker" x="-62" y="-8">05 / workspace</text>
-                  <text class="node-label" x="-62" y="12">the change lands</text>
+                  <rect class="node-card" x="-86" y="-33" width="172" height="66" rx="2" />
+                  <rect class="node-accent" x="-86" y="-33" width="4" height="66" rx="2" />
+                  <text class="node-kicker" x="-70" y="-10">05 / workspace</text>
+                  <text class="node-label" x="-70" y="12">the change lands</text>
                 </g>
 
                 <g class="loop-node" data-node data-at="0.793" transform="translate(100 220)">
-                  <rect x="-66" y="-27" width="132" height="54" rx="2" />
-                  <text class="node-kicker" x="-52" y="-6">06 / answer</text>
-                  <text class="node-label" x="-52" y="14">back to you</text>
+                  <rect class="node-card" x="-72" y="-30" width="144" height="60" rx="2" />
+                  <rect class="node-accent" x="-72" y="-30" width="4" height="60" rx="2" />
+                  <text class="node-kicker" x="-56" y="-8">06 / answer</text>
+                  <text class="node-label" x="-56" y="14">back to you</text>
                 </g>
 
-                <circle class="loop-pulse" data-loop-pulse cx="100" cy="560" r="5" />
+                <circle class="loop-pulse" data-loop-pulse cx="100" cy="560" r="6" />
               </svg>
 
               <div class="loop-legend" aria-label="Capability access states">

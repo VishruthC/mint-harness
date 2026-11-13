@@ -72,6 +72,21 @@ export function maskSecret(text: string): string {
 
 export type ConnectField = "apiKey" | "baseUrl" | "model";
 
+/**
+ * Where a terminal bracketed-paste event belongs.
+ *
+ * Paste events bypass the keyboard handler, so the main input and the connect
+ * popup must be routed explicitly. The session picker intentionally swallows
+ * paste to avoid changing the workspace while it is open.
+ */
+export type PasteDestination = "chat" | "connect" | "none";
+
+export function pasteDestination(connectOpen: boolean, sessionPickerOpen: boolean): PasteDestination {
+  if (sessionPickerOpen) return "none";
+  if (connectOpen) return "connect";
+  return "chat";
+}
+
 export function nextConnectField(current: ConnectField, shift: boolean): ConnectField {
   const order: ConnectField[] = ["apiKey", "baseUrl", "model"];
   const idx = order.indexOf(current);

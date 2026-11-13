@@ -3,6 +3,17 @@
 All notable changes to MINT are documented here. This project follows
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.2] - 2026-11-13
+
+### Fixed
+
+- Terminal bracketed paste now reaches the `/connect` API-key field instead of
+  being discarded while the connect popup is open.
+- Sidebar cat frames now trim baked-in or transparent margins in memory,
+  share one crop box per animation to avoid frame-to-frame pulsing, and use the
+  full sidebar width. This makes the artwork noticeably sharper in terminals
+  that render images with Unicode blocks instead of Kitty or Sixel.
+
 ## [0.1.1] - 2026-11-12
 
 ### Added
@@ -58,5 +69,6 @@ All notable changes to MINT are documented here. This project follows
 - Project-context discovery, model picker, usage limits, and the animated cat
   companion.
 
+[0.1.2]: https://github.com/VishruthC/mint-harness/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/VishruthC/mint-harness/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/VishruthC/mint-harness/releases/tag/v0.1.0
