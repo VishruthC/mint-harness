@@ -79,11 +79,16 @@ export type ConnectField = "apiKey" | "baseUrl" | "model";
  * popup must be routed explicitly. The session picker intentionally swallows
  * paste to avoid changing the workspace while it is open.
  */
-export type PasteDestination = "chat" | "connect" | "none";
+export type PasteDestination = "chat" | "connect" | "model" | "none";
 
-export function pasteDestination(connectOpen: boolean, sessionPickerOpen: boolean): PasteDestination {
+export function pasteDestination(
+  connectOpen: boolean,
+  sessionPickerOpen: boolean,
+  modelPickerOpen = false,
+): PasteDestination {
   if (sessionPickerOpen) return "none";
   if (connectOpen) return "connect";
+  if (modelPickerOpen) return "model";
   return "chat";
 }
 

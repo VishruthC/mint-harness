@@ -34,6 +34,7 @@ import {
   normalizeSessionTitle,
   deriveTitleFromMessage,
 } from "./session";
+import { COMMANDS, filterCommands, formatCommandHelp } from "./commands.ts";
 import {
   filterModels,
   mergeCurrentModel,
@@ -367,44 +368,7 @@ function App() {
   // Keep the palette, input, and chat chrome on screen at short terminal heights.
   // Leave extra room for the palette while command suggestions are open.
   const commandLimit = () => Math.max(1, Math.min(7, terminal().height - 20));
-  const commands = [
-    { command: "/help", description: "Show all commands" },
-    { command: "/update", description: "Check for and install the latest stable MINT release" },
-    { command: "/version", description: "Display the installed version and update status" },
-    { command: "/models", description: "List NVIDIA models" },
-    { command: "/model", description: "Choose a model (opens picker)" },
-    { command: "/retry", description: "Retry the last user message" },
-    { command: "/connect", description: "Configure NVIDIA API credentials" },
-    { command: "/session", description: "List or resume sessions" },
-    { command: "/sessions", description: "List or resume sessions (alias)" },
-    { command: "/session new", description: "Start a fresh session" },
-    { command: "/session delete ", description: "Delete a session" },
-    { command: "/session rename ", description: "Rename the active session" },
-    { command: "/workspace", description: "Show workspace root" },
-    { command: "/capabilities", description: "Show real harness capabilities" },
-    { command: "/limits", description: "Show current agent limits (rounds/calls) and config keys" },
-    { command: "/project", description: "Inspect project type, manifests, README, and .gitignore" },
-    { command: "/command ", description: "Preview a restricted terminal command" },
-    { command: "/run", description: "Approve and run the pending command" },
-    { command: "/ls ", description: "List workspace files" },
-    { command: "/read ", description: "Read a workspace file" },
-    { command: "/search ", description: "Search workspace text" },
-    { command: "/propose ", description: "Propose a file change" },
-    { command: "/apply", description: "Approve the pending change" },
-    { command: "/reject", description: "Discard the pending change" },
-    { command: "/cancel-write", description: "Cancel file proposal input" },
-    { command: "/cancel", description: "Stop the current response" },
-    { command: "/clear", description: "Start a fresh session" },
-    { command: "/quit", description: "Exit MINT" },
-  ];
-  const commandSuggestions = createMemo(() => {
-    const value = input().trimStart();
-    if (!value.startsWith("/")) return [];
-    // Once an argument starts, suggestions should not cover the input or steal navigation.
-    if (value.includes(" ")) return [];
-    // Keep the picker compact; typing filters the complete command list.
-    return commands.filter((item) => item.command.trim().startsWith(value)).slice(0, commandLimit());
-  });
+  const commandSuggestions = createMemo(() => filterCommands(input()));
   // Reset commandIndex when suggestions change (filter typed)
   createEffect(() => {
     commandSuggestions();
@@ -1022,16 +986,25 @@ const showTokenUsage = () => terminal().width >= 48;
     return new Date(iso).toLocaleDateString();
   };
 
-  const commandPaletteHeader = () =>
-    terminal().width >= 64 ? "COMMANDS  ·  ↑/↓ select  ·  Tab complete" : "COMMANDS  ·  ↑/↓  ·  Tab";
+  const commandPaletteHeader = () => {
+    const total = commandSuggestions().length;
+    const window = visibleWindow(commandIndex(), commandLimit(), total);
+    const range = window.length
+      ? `${window[0] + 1}-${window[window.length - 1] + 1}/${total}`
+      : `0/${total}`;
+    return terminal().width >= 64
+      ? `COMMANDS ${range} · ↑/↓ select · Tab complete`
+      : `COMMANDS ${range} · ↑/↓ · Tab`;
+  };
 
   const modelPickerHeader = () => {
-    const filtered = filterModels(mergeCurrentModel(models(), configuredModel || model() || ""), modelPickerQuery());
-    const q = modelPickerQuery();
+    const all = mergeCurrentModel(models(), configuredModel || model() || "");
+    const filtered = filterModels(all, modelPickerQuery());
+    const count = modelPickerQuery() ? `${filtered.length}/${all.length} matches` : `${all.length} models`;
     if (terminal().width >= 72) {
-      return `MODELS · ${filtered.length}${q ? ` · filter "${q}"▌` : " · type to filter · ↑/↓ · Enter"}`;
+      return `MODELS · ${count} · ↑/↓ select · Enter use · Esc close`;
     }
-    return `MODELS · ${filtered.length}${q ? ` · "${q}"` : " · ↑/↓ · Enter"}`;
+    return `MODELS · ${count} · ↑/↓ · Enter`;
   };
 
   // Model picker suggestions memo - full filtered list (windowing handled in render)
@@ -1517,8 +1490,9 @@ const showTokenUsage = () => terminal().width >= 48;
       void readClipboardText().then((text) => {
         if (text) {
           const { text: sanitized, truncated } = sanitizePastedText(text);
-          if (sanitized) {
-            setModelPickerQuery((q) => q + sanitized);
+          const queryText = sanitized.replace(/\s+/g, " ");
+          if (queryText) {
+            setModelPickerQuery((q) => q + queryText);
             setModelPickerIndex(0);
             if (truncated) showToast(`Paste truncated to ${MAX_PASTE_CHARS} chars`);
           }
@@ -2044,7 +2018,7 @@ const showTokenUsage = () => terminal().width >= 48;
     if (text === "/help") {
       setMessages((old) => [...old, {
         role: "assistant",
-        content: "Commands: /help · /update · /version · /models · /model · /connect · /session · /session new · /session delete <id> · /session rename · /workspace · /project · /capabilities · /limits · /autoapply [on|off|status|save] · /ls [path] · /read <path> · /search <text> · /propose <path> · /apply · /approve · /reject · /command <program args> · /run · /reject-command · /cancel · /clear · /quit\n\nShortcuts: Ctrl+Y = approve pending proposal/command\nFile changes require explicit /apply approval (or enable auto-apply with /autoapply on). Terminal commands are restricted, previewed, and run only after explicit /run approval. /update checks npm and asks before installing the latest stable release; MINT must be restarted after a successful update. Web browsing remains unavailable.",
+        content: `Commands: ${formatCommandHelp()}\n\nShortcuts: Ctrl+Y = approve pending proposal/command\nFile changes require explicit /apply approval (or enable auto-apply with /autoapply on). Terminal commands are restricted, previewed, and run only after explicit /run approval. /update checks npm and asks before installing the latest stable release; MINT must be restarted after a successful update. Web browsing remains unavailable.`,
       }]);
       return;
     }
@@ -2458,15 +2432,24 @@ const showTokenUsage = () => terminal().width >= 48;
 
   // Paste handler (terminal bracketed paste)
   usePaste((event) => {
-    const destination = pasteDestination(connectOpen(), sessionPickerOpen());
+    const destination = pasteDestination(connectOpen(), sessionPickerOpen(), modelPickerOpen());
     if (destination === "none") return;
     const pasted = decodePasteBytes(event.bytes);
     // Terminal bracketed paste bypasses key handlers, so route it to the
-    // connect field explicitly. Ctrl+V / Shift+Insert are handled separately
-    // in handleConnectKey via the clipboard API.
+    // active popup explicitly. Ctrl+V / Shift+Insert are handled separately.
     if (destination === "connect") {
       pasteEventCounter++;
       void handleConnectPaste(pasted);
+      return;
+    }
+    if (destination === "model") {
+      pasteEventCounter++;
+      const { text: sanitized, truncated } = sanitizePastedText(stripAnsiSequences(pasted));
+      const queryText = sanitized.replace(/\s+/g, " ");
+      if (!queryText) return;
+      setModelPickerQuery((query) => query + queryText);
+      setModelPickerIndex(0);
+      if (truncated) showToast(`Paste truncated to ${MAX_PASTE_CHARS} chars`);
       return;
     }
     pasteEventCounter++;
@@ -2684,7 +2667,7 @@ const showTokenUsage = () => terminal().width >= 48;
         setCursorPos(pos + 1);
       }
     } else if (key.name === "return") {
-      const exactCommand = commands.find((item) => item.command.trim() === value.trim());
+      const exactCommand = COMMANDS.find((item) => item.command.trim() === value.trim());
       const exactSuggestion = suggestions.find((item) => item.command.trim() === value.trim());
       // Argument-taking commands complete on first Enter; an exact model result can execute.
       if (suggestions.length && (Boolean(exactCommand?.command.endsWith(" ")) || (!exactSuggestion && !exactCommand))) {
@@ -3052,11 +3035,13 @@ const showTokenUsage = () => terminal().width >= 48;
           </For>
           </scrollbox>
           <Show when={commandSuggestions().length > 0 && !modelPickerOpen() && !approvalCurrent()}>
-            <box backgroundColor={colors.bg} borderStyle="single" borderColor={colors.lavender} padding={1} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden" onMouseScroll={(e) => { e.stopPropagation(); }}>
+            <box backgroundColor={colors.bg} borderStyle="single" borderColor={colors.lavender} padding={1} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden" onMouseScroll={(e) => handleWheel(e, (d) => setCommandIndex(movePickerIndex(commandIndex(), d, commandSuggestions().length)))}>
               <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
                 <text fg={colors.lavender} wrapMode="none" width="100%" minWidth={0} truncate={true}>{commandPaletteHeader()}</text>
               </box>
-              <For each={commandSuggestions()}>{(item, index) => {
+              <For each={visibleWindow(commandIndex(), commandLimit(), commandSuggestions().length)}>{(idx) => {
+                const item = commandSuggestions()[idx];
+                if (!item) return <text> </text>;
                 return (
                   <box
                     flexDirection="row"
@@ -3065,12 +3050,12 @@ const showTokenUsage = () => terminal().width >= 48;
                     height={1}
                     minHeight={1}
                     overflow="hidden"
-                    backgroundColor={index() === commandIndex() ? colors.lavender : colors.bg}
-                    onMouseMove={() => { setCommandIndex(index()); }}
-                    onMouseUp={(e) => { e.stopPropagation(); const value = input(); const selected = commandSuggestions()[index()]; if (selected) { const completed = selected.command.trimEnd(); const nextValue = completed + (selected.command.endsWith(" ") ? " " : ""); setInput(nextValue); setCursorPos(nextValue.length); if (selected.command.trim() === value.trim()) void send(); } }}
+                    backgroundColor={idx === commandIndex() ? colors.lavender : colors.bg}
+                    onMouseMove={() => { setCommandIndex(idx); }}
+                    onMouseUp={(e) => { e.stopPropagation(); const value = input(); const completed = item.command.trimEnd(); const nextValue = completed + (item.command.endsWith(" ") ? " " : ""); setInput(nextValue); setCursorPos(nextValue.length); if (item.command.trim() === value.trim()) void send(); }}
                   >
                     <text
-                      fg={index() === commandIndex() ? colors.bg : colors.mint}
+                      fg={idx === commandIndex() ? colors.bg : colors.mint}
                       width={24}
                       maxWidth="100%"
                       minWidth={0}
@@ -3079,11 +3064,11 @@ const showTokenUsage = () => terminal().width >= 48;
                       wrapMode="none"
                       truncate={true}
                     >
-                      {(index() === commandIndex() ? "❯ " : "  ") + item.command.trimEnd()}
+                      {(idx === commandIndex() ? "❯ " : "  ") + item.command.trimEnd()}
                     </text>
                     <Show when={terminal().width >= 72}>
                       <text
-                        fg={index() === commandIndex() ? colors.bg : colors.muted}
+                        fg={idx === commandIndex() ? colors.bg : colors.muted}
                         flexGrow={1}
                         minWidth={0}
                         wrapMode="none"
@@ -3247,9 +3232,9 @@ const showTokenUsage = () => terminal().width >= 48;
         <box backgroundColor={colors.bg} borderStyle="single" borderColor={colors.lavender} padding={1} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden" onMouseScroll={(e) => handleWheel(e, (d) => setModelPickerIndex(movePickerIndex(modelPickerIndex(), d, modelPickerSuggestions().length)))} >
           <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
             <text fg={colors.lavender} wrapMode="none" width="100%" minWidth={0} truncate={true}>{modelPickerHeader()}</text>
-           <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
-             <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>{`search: ${modelPickerQuery()}${modelPickerQuery() ? "" : " (type to filter)"}`}</text>
-           </box>
+          </box>
+          <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
+            <text fg={colors.muted} wrapMode="none" width="100%" minWidth={0} truncate={true}>{`search: ${modelPickerQuery() || "(type a model name)"}${modelPickerQuery() ? "▌" : ""}`}</text>
           </box>
           <Show when={modelPickerError()}>
             <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">

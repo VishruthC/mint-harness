@@ -3,6 +3,30 @@
 All notable changes to MINT are documented here. This project follows
 [Semantic Versioning](https://semver.org/) and [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.3] - 2026-11-13
+
+### Fixed
+
+- The `/` command palette now keeps the complete command list and scrolls a
+  visible window instead of silently truncating to the first seven entries.
+  The header shows the current range, and `/help` is generated from the same
+  command list so both surfaces stay in sync.
+- Added missing palette entries for `/new`, `/exit`, `/approve`, `/autoapply`,
+  and `/reject-command`.
+- Model picker search now matches natural names regardless of punctuation,
+  casing, or spacing, so `Llama 3.1 8B` finds `meta/llama-3.1-8b-instruct`.
+  Exact and prefix matches sort first, and the search row no longer overlaps
+  the picker header. Pasted model names are routed into the filter.
+
+### Changed
+
+- The `minth` launcher now starts Bun in the directory the user invoked it from,
+  passing the OpenTUI Solid preload (and source tsconfig) by absolute path.
+  This leaves the installed package directory unlocked, so `/update` can replace
+  it on Windows. Windows users on `0.1.2` need one manual
+  `npm install -g mint-harness@latest` to get this launcher; later updates work
+  from `/update`.
+
 ## [0.1.2] - 2026-11-13
 
 ### Fixed
@@ -69,6 +93,7 @@ All notable changes to MINT are documented here. This project follows
 - Project-context discovery, model picker, usage limits, and the animated cat
   companion.
 
+[0.1.3]: https://github.com/VishruthC/mint-harness/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/VishruthC/mint-harness/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/VishruthC/mint-harness/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/VishruthC/mint-harness/releases/tag/v0.1.0

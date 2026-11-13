@@ -263,9 +263,15 @@ describe("connect helpers", () => {
       expect(pasteDestination(false, false)).toBe("chat");
     });
 
+    test("routes paste into the model picker filter", () => {
+      expect(pasteDestination(false, false, true)).toBe("model");
+      expect(pasteDestination(true, false, true)).toBe("connect");
+    });
+
     test("swallows paste while the session picker is open", () => {
       expect(pasteDestination(false, true)).toBe("none");
       expect(pasteDestination(true, true)).toBe("none");
+      expect(pasteDestination(false, true, true)).toBe("none");
     });
   });
 

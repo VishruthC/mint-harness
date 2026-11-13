@@ -76,12 +76,15 @@ You can also create a local launcher in the source checkout with `bun run instal
 - `/help` - show available commands
 - `/update` - check npm and install the latest stable release after confirmation
 - `/version` - show the installed version and update status
-- `/models` - refresh and list NVIDIA models (or open model picker)
-- `/model` - open interactive model picker
+- `/models` - refresh the catalog and open the model picker
+- `/model` - open the model picker; type a model name to filter
 - `/model <id>` - select a model directly (persists to `.env`)
+- `/retry` - retry the last user message
 - `/connect` - configure NVIDIA API credentials (opens secure popup)
 - `/session` - list or resume sessions (interactive picker)
+- `/sessions` - list or resume sessions (alias)
 - `/session new` - start a fresh session
+- `/new` - start a fresh session (alias)
 - `/session delete <id>` - delete a session
 - `/session rename` - rename active session (opens popup)
 - `/session rename <name>` - rename active session directly
@@ -94,12 +97,15 @@ You can also create a local launcher in the source checkout with `bun run instal
 - `/search <text>` - search text files in the workspace
 - `/propose <path>` - propose a file replacement (then send full content)
 - `/apply` / `/reject` - approve or discard a pending file proposal
+- `/approve` - approve the current pending file change or command
+- `/autoapply` - show or change auto-apply mode (`on`, `off`, `status`, `save`)
 - `/cancel-write` - cancel write input or discard the current proposal
 - `/command <cmd>` - propose an allowlisted terminal command
 - `/run` / `/reject-command` - approve or discard a pending command
 - `/cancel` - cancel an in-progress response
 - `/clear` - start a fresh session (old sessions remain saved)
 - `/quit` - exit MINT
+- `/exit` - exit MINT (alias)
 - `Shift+Enter` - insert a newline; `Enter` sends
 
 ## Mouse & keyboard

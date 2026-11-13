@@ -1,6 +1,6 @@
 {
   "name": "mint-harness",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "A cute NVIDIA-powered terminal coding harness.",
   "type": "module",
   "bin": {
@@ -15,7 +15,7 @@
     "first-chat": "bun scripts/first-chat.ts",
     "cat:assets": "bun scripts/cat-assets.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun test tests/agent-loop.test.ts tests/agent-tools.test.ts tests/cat-assets.test.ts tests/cat-frame-crop.test.ts tests/cat.test.ts tests/config.test.ts tests/first-chat.test.ts tests/install-minth.test.ts tests/nvidia.test.ts tests/storage.test.ts tests/terminal.test.ts tests/tools.test.ts tests/connect.test.ts tests/usage.test.ts tests/message-segments.test.ts tests/models.test.ts tests/ui-format.test.ts tests/approval.test.ts tests/permission-store.test.ts tests/updater.test.ts",
+    "test": "bun test tests/agent-loop.test.ts tests/agent-tools.test.ts tests/cat-assets.test.ts tests/cat-frame-crop.test.ts tests/cat.test.ts tests/commands.test.ts tests/config.test.ts tests/first-chat.test.ts tests/install-minth.test.ts tests/launcher.test.ts tests/nvidia.test.ts tests/storage.test.ts tests/terminal.test.ts tests/tools.test.ts tests/connect.test.ts tests/usage.test.ts tests/message-segments.test.ts tests/models.test.ts tests/ui-format.test.ts tests/approval.test.ts tests/permission-store.test.ts tests/updater.test.ts",
     "check:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-windows.ps1"
   },
   "dependencies": {

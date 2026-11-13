@@ -1,13 +1,54 @@
 import type { NvidiaModel } from "./nvidia";
 
+function normalizeSearch(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function compactSearch(value: string): string {
+  return value.replace(/\s+/g, "");
+}
+
+function modelHaystack(model: NvidiaModel): string {
+  return normalizeSearch(`${model.id} ${model.owned_by ?? ""}`);
+}
+
+function relevance(model: NvidiaModel, query: string, compactQuery: string, tokens: string[]): number {
+  const id = normalizeSearch(model.id);
+  const idCompact = compactSearch(id);
+  if (id === query) return 0;
+  if (idCompact === compactQuery) return 1;
+  if (id.startsWith(query) || idCompact.startsWith(compactQuery)) return 2;
+  const words = id.split(" ").filter(Boolean);
+  if (tokens.every((token) => words.some((word) => word.startsWith(token)))) return 3;
+  return 4;
+}
+
+/**
+ * Search model IDs and providers using natural names. Punctuation, casing and
+ * spacing are ignored, and every token must match, so `Llama 3.1 8B` finds
+ * `meta/llama-3.1-8b-instruct`. Exact and prefix matches sort first.
+ */
 export function filterModels(models: NvidiaModel[], query: string): NvidiaModel[] {
-  const q = query.trim().toLowerCase().replace(/\s+/g, " ");
-  if (!q) return models;
-  return models.filter((m) => {
-    const id = m.id.toLowerCase();
-    const owner = (m.owned_by ?? "").toLowerCase();
-    return id.includes(q) || owner.includes(q) || id.replace(/[^a-z0-9]/g, " ").includes(q);
-  });
+  const normalized = normalizeSearch(query);
+  if (!normalized) return models;
+  const tokens = normalized.split(" ");
+  const compact = compactSearch(normalized);
+
+  return models
+    .filter((model) => {
+      const haystack = modelHaystack(model);
+      return (
+        tokens.every((token) => haystack.includes(token))
+        || compactSearch(haystack).includes(compact)
+      );
+    })
+    .map((model, index) => ({
+      model,
+      index,
+      score: relevance(model, normalized, compact, tokens),
+    }))
+    .sort((a, b) => a.score - b.score || a.index - b.index)
+    .map((entry) => entry.model);
 }
 
 export function mergeCurrentModel(models: NvidiaModel[], current: string): NvidiaModel[] {
