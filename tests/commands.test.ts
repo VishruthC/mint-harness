@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { COMMANDS, filterCommands, formatCommandHelp } from "../src/commands";
-import { visibleWindow } from "../src/models";
+import { followPickerWindow, visibleWindow } from "../src/models";
 
 describe("slash command palette", () => {
   test("includes every implemented command, including aliases and approval commands", () => {
@@ -73,13 +73,27 @@ describe("slash command palette", () => {
   test("the visible window follows the selection through the whole list", () => {
     const rows = 7;
     const last = COMMANDS.length - 1;
-    const endWindow = visibleWindow(last, rows, COMMANDS.length);
+    const endStart = followPickerWindow(0, last, rows, COMMANDS.length);
+    const endWindow = visibleWindow(endStart, rows, COMMANDS.length);
     expect(endWindow.length).toBeLessThanOrEqual(rows);
     expect(endWindow).toContain(last);
     expect(endWindow[0]).toBe(COMMANDS.length - rows);
 
-    const middleWindow = visibleWindow(16, rows, COMMANDS.length);
+    const middleStart = followPickerWindow(0, 16, rows, COMMANDS.length);
+    const middleWindow = visibleWindow(middleStart, rows, COMMANDS.length);
     expect(middleWindow).toContain(16);
     expect(middleWindow.length).toBe(rows);
+  });
+
+  test("scrolling waits for the complete top and bottom edges", () => {
+    const rows = 7;
+    const count = COMMANDS.length;
+    expect(followPickerWindow(0, rows - 1, rows, count)).toBe(0);
+    expect(followPickerWindow(0, rows, rows, count)).toBe(1);
+
+    // Moving up inside the window does not scroll until the top edge is hit.
+    expect(followPickerWindow(1, rows - 1, rows, count)).toBe(1);
+    expect(followPickerWindow(1, 1, rows, count)).toBe(1);
+    expect(followPickerWindow(1, 0, rows, count)).toBe(0);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { filterModels } from "../src/models";
+import { displayModelName, filterModels, mergeCurrentModel } from "../src/models";
 import type { NvidiaModel } from "../src/nvidia";
 
 function model(id: string, owned_by = "nvidia"): NvidiaModel {
@@ -13,9 +13,26 @@ describe("filterModels", () => {
     model("mistralai/mixtral-8x7b-instruct-v0.1", "mistralai"),
   ];
 
-  test("empty query returns all models", () => {
-    expect(filterModels(models, "")).toHaveLength(3);
+  test("empty query returns all models alphabetically by display name", () => {
+    const ordered = filterModels(models, "");
+    expect(ordered).toHaveLength(3);
+    expect(ordered.map((m) => displayModelName(m.id))).toEqual([
+      "Llama 3.1 8B Instruct",
+      "Mixtral 8x7b Instruct V0.1",
+      "Nemotron 4 340b Instruct",
+    ]);
     expect(filterModels(models, "   ")).toHaveLength(3);
+  });
+
+  test("keeps the configured model in the catalog and sorts it in place", () => {
+    const withCurrent = mergeCurrentModel(models, "google/gemma-2-27b-it");
+    const ordered = filterModels(withCurrent, "");
+    expect(ordered.map((entry) => entry.id)).toEqual([
+      "google/gemma-2-27b-it",
+      "meta/llama-3.1-8b-instruct",
+      "mistralai/mixtral-8x7b-instruct-v0.1",
+      "nvidia/nemotron-4-340b-instruct",
+    ]);
   });
 
   test("matches id case-insensitively", () => {

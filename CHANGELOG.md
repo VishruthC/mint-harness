@@ -17,6 +17,17 @@ All notable changes to MINT are documented here. This project follows
   casing, or spacing, so `Llama 3.1 8B` finds `meta/llama-3.1-8b-instruct`.
   Exact and prefix matches sort first, and the search row no longer overlaps
   the picker header. Pasted model names are routed into the filter.
+- The model picker filter now updates the visible rows immediately while
+  typing. The list was previously keyed by numeric window positions, so the
+  header count changed while the old model names stayed on screen. `/model`
+  now opens the full catalog sorted alphabetically by display name, highlights
+  the current model, and searches display names, IDs, and providers.
+- Slash-command filtering now updates the visible rows immediately for the same
+  reason. Command autocomplete and the model picker also scroll only when the
+  highlighted row reaches the complete top or bottom edge, so the list stays
+  still while the selection remains visible.
+- Wheeling over the chat or session sidebar while the command palette or model
+  picker is open now scrolls only the menu; the background stays put.
 
 ### Changed
 

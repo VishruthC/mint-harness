@@ -36,7 +36,9 @@ import {
 } from "./session";
 import { COMMANDS, filterCommands, formatCommandHelp } from "./commands.ts";
 import {
+  displayModelName,
   filterModels,
+  followPickerWindow,
   mergeCurrentModel,
   movePickerIndex,
   pagePickerIndex,
@@ -362,6 +364,7 @@ function App() {
   const inputLines = () => input().split("\n").length;
   const atMaxLines = () => inputLines() >= MAX_INPUT_LINES;
   const [commandIndex, setCommandIndex] = createSignal(0);
+  const [commandWindowStart, setCommandWindowStart] = createSignal(0);
   const renderer = useRenderer();
   const markdownStyle = createMemo(() => getMarkdownStyle(renderer));
   const terminal = useTerminalDimensions();
@@ -373,6 +376,13 @@ function App() {
   createEffect(() => {
     commandSuggestions();
     setCommandIndex(0);
+  });
+  // The palette only scrolls once the highlight reaches a visible edge.
+  createEffect(() => {
+    const index = commandIndex();
+    const count = commandSuggestions().length;
+    const rows = commandLimit();
+    setCommandWindowStart((start) => followPickerWindow(start, index, rows, count));
   });
   const [messages, setMessages] = createSignal<ViewMessage[]>([
     { role: "assistant", content: "mrrp! I'm MINT. Type a message to chat, or /help for commands. ♡" },
@@ -810,6 +820,7 @@ function App() {
   // Session picker state
   const [sessionPickerOpen, setSessionPickerOpen] = createSignal(false);
   const [sessionPickerIndex, setSessionPickerIndex] = createSignal(0);
+  const [sessionWindowStart, setSessionWindowStart] = createSignal(0);
   const [sessionPickerHoverIndex, setSessionPickerHoverIndex] = createSignal(-1);
   const [sessionPickerSessions, setSessionPickerSessions] = createSignal<Session[]>([]);
   const [sessionPickerQuery, setSessionPickerQuery] = createSignal("");
@@ -823,6 +834,13 @@ function App() {
       (s.model || "").toLowerCase().includes(q) ||
       s.id.toLowerCase().includes(q)
     );
+  });
+
+  createEffect(() => {
+    const index = sessionPickerIndex();
+    const count = filteredSessions().length;
+    const rows = commandLimit();
+    setSessionWindowStart((start) => followPickerWindow(start, index, rows, count));
   });
 
 
@@ -874,6 +892,7 @@ function App() {
   const [modelPickerOpen, setModelPickerOpen] = createSignal(false);
   const [modelPickerQuery, setModelPickerQuery] = createSignal("");
   const [modelPickerIndex, setModelPickerIndex] = createSignal(0);
+  const [modelWindowStart, setModelWindowStart] = createSignal(0);
   const [modelPickerBusy, setModelPickerBusy] = createSignal(false);
   const [modelPickerError, setModelPickerError] = createSignal<string | null>(null);
   let modelPickerAbort: AbortController | undefined;
@@ -901,26 +920,6 @@ function App() {
         : terminal().width >= 26
           ? "MINT ♡ · approval-gated"
           : "MINT ♡";
-
-  const displayModelName = (id: string): string => {
-    if (!id) return "no model";
-    // Strip vendor prefix (meta/, nvidia/, etc.)
-    const parts = id.split("/");
-    const name = parts.length > 1 ? parts[1] : parts[0];
-    const brands: Record<string, string> = {
-      deepseek: "DeepSeek",
-      openai: "OpenAI",
-      gpt: "GPT",
-      llm: "LLM",
-      ai: "AI",
-      moe: "MoE",
-    };
-    // Prettify: split on dashes/underscores, capitalize words
-    return name
-      .split(/[-_]/)
-      .map((w) => brands[w.toLowerCase()] ?? (w.length <= 2 ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
-      .join(" ");
-  };
 
   const effort = () => {
     try {
@@ -988,7 +987,7 @@ const showTokenUsage = () => terminal().width >= 48;
 
   const commandPaletteHeader = () => {
     const total = commandSuggestions().length;
-    const window = visibleWindow(commandIndex(), commandLimit(), total);
+    const window = visibleWindow(commandWindowStart(), commandLimit(), total);
     const range = window.length
       ? `${window[0] + 1}-${window[window.length - 1] + 1}/${total}`
       : `0/${total}`;
@@ -1020,6 +1019,14 @@ const showTokenUsage = () => terminal().width >= 48;
     if (count === 0) { if (idx !== 0) setModelPickerIndex(0); return; }
     if (idx >= count) setModelPickerIndex(count - 1);
     if (idx < 0) setModelPickerIndex(0);
+  });
+
+  // Scroll the picker only when the highlighted row crosses a visible edge.
+  createEffect(() => {
+    const index = modelPickerIndex();
+    const count = modelPickerSuggestions().length;
+    const rows = commandLimit();
+    setModelWindowStart((start) => followPickerWindow(start, index, rows, count));
   });
 
 
@@ -1362,9 +1369,17 @@ const showTokenUsage = () => terminal().width >= 48;
   };
 
   // Model picker handlers
+  const modelPickerCurrentIndex = () => {
+    const current = configuredModel || model() || "";
+    if (!current) return 0;
+    const all = filterModels(mergeCurrentModel(models(), current), "");
+    return Math.max(0, all.findIndex((entry) => entry.id === current));
+  };
+
   const openModelPicker = (refresh = false) => {
     setModelPickerQuery("");
-    setModelPickerIndex(0);
+    setModelWindowStart(0);
+    setModelPickerIndex(modelPickerCurrentIndex());
     setModelPickerError(null);
     setModelPickerOpen(true);
     if (refresh) {
@@ -2861,6 +2876,13 @@ const showTokenUsage = () => terminal().width >= 48;
   };
   const commandPaletteOpen = () => commandSuggestions().length > 0 && !modelPickerOpen() && !approvalCurrent();
   const menuScrollActive = () => commandPaletteOpen() || modelPickerOpen();
+  // A menu needs wheel input even when the pointer is over the chat or sidebar.
+  // OpenTUI scrollers consume the wheel before it can bubble, so hold the
+  // background scroll step at zero and route that wheel event to the menu.
+  const backgroundScrollAccel = {
+    tick: () => (menuScrollActive() ? 0 : 1),
+    reset: () => {},
+  };
   const handleMenuWheel = (event: WheelEvent) => {
     if (modelPickerOpen()) {
       event.stopPropagation?.();
@@ -2918,55 +2940,50 @@ const showTokenUsage = () => terminal().width >= 48;
             oneShotSpeed={catPrefs?.oneShotSpeed ?? 1}
             colors={{ divider: colors.catLine, ascii: { transparent: "transparent", outline: colors.catLine, body: colors.lavender, light: colors.pink, eye: colors.peach } }}
           />
-          <box flexGrow={1} minHeight={0} width="100%" overflow="hidden">
-            <scrollbox flexGrow={1} minHeight={0} width="100%" overflow="hidden" verticalScrollbarOptions={{ visible: false }}>
-              <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0}>
-                <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none">SESSIONS</text>
-                <For each={allSessions()}>
-                  {(s) => (
-                    <box
-                      flexDirection="column"
-                      gap={0}
+          <scrollbox flexGrow={1} minHeight={0} width="100%" overflow="hidden" verticalScrollbarOptions={{ visible: false }} scrollAcceleration={backgroundScrollAccel} onMouseScroll={handleMenuWheel}>
+            <box flexDirection="column" gap={1} width="100%" minWidth={0} flexShrink={0}>
+              <text fg={colors.lavender} width="100%" minWidth={0} wrapMode="none">SESSIONS</text>
+              <For each={allSessions()}>
+                {(s) => (
+                  <box
+                    flexDirection="column"
+                    gap={0}
+                    width="100%"
+                    minWidth={0}
+                    paddingLeft={1}
+                    paddingRight={1}
+                    backgroundColor={session() === s.id ? colors.lavender : "transparent"}
+                    onMouseUp={() => { if (session() !== s.id) resumeSession(s.id); }}
+                  >
+                    <text
+                      fg={session() === s.id ? colors.bg : colors.text}
                       width="100%"
                       minWidth={0}
-                      paddingLeft={1}
-                      paddingRight={1}
-                      backgroundColor={session() === s.id ? colors.lavender : "transparent"}
-                      onMouseUp={() => { if (session() !== s.id) resumeSession(s.id); }}
+                      wrapMode="none"
+                      truncate={true}
                     >
-                      <text
-                        fg={session() === s.id ? colors.bg : colors.text}
-                        width="100%"
-                        minWidth={0}
-                        wrapMode="none"
-                        truncate={true}
-                      >
-                        {(session() === s.id ? "❯ " : "  ") + (s.title || "unnamed")}
-                      </text>
-                      <text
-                        fg={session() === s.id ? colors.bg : colors.muted}
-                        width="100%"
-                        minWidth={0}
-                        wrapMode="none"
-                        truncate={true}
-                      >
-                        {displayModelName(s.model)} · {relativeTime(s.updated_at)}
-                      </text>
-                    </box>
-                  )}
-                </For>
-                <Show when={allSessions().length === 0}>
-                  <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none">no sessions in this directory</text>
-                </Show>
-                <Show when={!session()}>
-                  <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none">draft · saved on first message</text>
-                </Show>
-              </box>
-            </scrollbox>
-            <Show when={menuScrollActive()}>
-              <box position="absolute" top={0} left={0} width="100%" height="100%" zIndex={1} onMouseScroll={handleMenuWheel} />
-            </Show>
-          </box>
+                      {(session() === s.id ? "❯ " : "  ") + (s.title || "unnamed")}
+                    </text>
+                    <text
+                      fg={session() === s.id ? colors.bg : colors.muted}
+                      width="100%"
+                      minWidth={0}
+                      wrapMode="none"
+                      truncate={true}
+                    >
+                      {displayModelName(s.model)} · {relativeTime(s.updated_at)}
+                    </text>
+                  </box>
+                )}
+              </For>
+              <Show when={allSessions().length === 0}>
+                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none">no sessions in this directory</text>
+              </Show>
+              <Show when={!session()}>
+                <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none">draft · saved on first message</text>
+              </Show>
+            </box>
+          </scrollbox>
         </box>
       </Show>
 
@@ -3001,74 +3018,68 @@ const showTokenUsage = () => terminal().width >= 48;
               </box>
             )}
           </Show>
-          <box flexGrow={1} minHeight={0} minWidth={0} width="100%" overflow="hidden">
-            <scrollbox flexGrow={1} minHeight={0} minWidth={0} width="100%" contentOptions={{ flexDirection: "column", gap: 1 }} stickyScroll={true} stickyStart="bottom">
-              <For each={messages()}>
-                {(message, index) => {
-                  const isStreamingRow = () => streamingActive() && index() === messages().length - 1 && message.role === "assistant" && !message.kind;
-                  return (
-                  <box flexDirection="column" gap={0} width="100%" minWidth={0}>
-                    {message.kind === "tool" ? (
-                      <box flexDirection="row" gap={1} width="100%" minWidth={0}>
-                        <text fg={colors.peach} wrapMode="none" flexShrink={0}>·</text>
-                        <text fg={colors.peach} wrapMode="none" flexShrink={0}>{message.meta?.name ?? ""}</text>
-                        <Show when={message.meta?.args}>
-                          <text fg={colors.lavender} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.meta!.args}</text>
-                        </Show>
+          <scrollbox flexGrow={1} minHeight={0} minWidth={0} width="100%" contentOptions={{ flexDirection: "column", gap: 1 }} stickyScroll={true} stickyStart="bottom" scrollAcceleration={backgroundScrollAccel} onMouseScroll={handleMenuWheel}>
+            <For each={messages()}>
+              {(message, index) => {
+                const isStreamingRow = () => streamingActive() && index() === messages().length - 1 && message.role === "assistant" && !message.kind;
+                return (
+                <box flexDirection="column" gap={0} width="100%" minWidth={0}>
+                  {message.kind === "tool" ? (
+                    <box flexDirection="row" gap={1} width="100%" minWidth={0}>
+                      <text fg={colors.peach} wrapMode="none" flexShrink={0}>·</text>
+                      <text fg={colors.peach} wrapMode="none" flexShrink={0}>{message.meta?.name ?? ""}</text>
+                      <Show when={message.meta?.args}>
+                        <text fg={colors.lavender} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.meta!.args}</text>
+                      </Show>
+                    </box>
+                  ) : message.kind === "result" ? (
+                    <box flexDirection="row" gap={1} width="100%" minWidth={0} paddingLeft={1}>
+                      <text fg={colors.muted} wrapMode="none" flexShrink={0}>↳</text>
+                      <text fg={colors.muted} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.content}</text>
+                    </box>
+                  ) : message.kind === "proposal" ? (
+                    <ProposalCard message={message} />
+                  ) : message.kind === "approval" ? (
+                    <box flexDirection="row" gap={1} width="100%" minWidth={0}>
+                      <text fg={colors.peach} wrapMode="none" flexShrink={0}>·</text>
+                      <text fg={colors.peach} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.content}</text>
+                    </box>
+                  ) : message.kind === "mode" ? (
+                    <box flexDirection="row" gap={1} width="100%" minWidth={0} paddingLeft={1} paddingRight={1}>
+                      <text fg={message.meta?.mode === "plan" ? colors.pink : colors.mint} wrapMode="none" flexShrink={0}>●</text>
+                      <text fg={message.meta?.mode === "plan" ? colors.pink : colors.mint} wrapMode="none" flexGrow={1} minWidth={0}>{message.content}</text>
+                    </box>
+                  ) : (
+                    <>
+                      <text fg={message.role === "user" ? colors.mint : message.role === "system" ? colors.muted : colors.pink}>
+                        {message.role === "user" ? "you ❯" : "mint ♡ · answer"}
+                      </text>
+                      <box flexDirection="column" gap={0} width="100%" minWidth={0}>
+                        {isStreamingRow() ? (
+                          <Show when={streamingContent()} fallback={<text fg={colors.peach} wrapMode="word" width="100%">Waiting for the response…</text>}>
+                            <markdown content={streamingContent()} syntaxStyle={markdownStyle()} fg={colors.text} conceal={true} streaming={true} width="100%" minWidth={0} />
+                          </Show>
+                        ) : message.content
+                          ? parseMessageSegments(message.content).map((seg) => renderSegment(seg, colors, markdownStyle()))
+                          : busy()
+                            ? <text fg={colors.peach} wrapMode="word" width="100%">Waiting for the response…</text>
+                            : null
+                        }
                       </box>
-                    ) : message.kind === "result" ? (
-                      <box flexDirection="row" gap={1} width="100%" minWidth={0} paddingLeft={1}>
-                        <text fg={colors.muted} wrapMode="none" flexShrink={0}>↳</text>
-                        <text fg={colors.muted} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.content}</text>
-                      </box>
-                    ) : message.kind === "proposal" ? (
-                      <ProposalCard message={message} />
-                    ) : message.kind === "approval" ? (
-                      <box flexDirection="row" gap={1} width="100%" minWidth={0}>
-                        <text fg={colors.peach} wrapMode="none" flexShrink={0}>·</text>
-                        <text fg={colors.peach} wrapMode="none" flexGrow={1} minWidth={0} truncate={true}>{message.content}</text>
-                      </box>
-                    ) : message.kind === "mode" ? (
-                      <box flexDirection="row" gap={1} width="100%" minWidth={0} paddingLeft={1} paddingRight={1}>
-                        <text fg={message.meta?.mode === "plan" ? colors.pink : colors.mint} wrapMode="none" flexShrink={0}>●</text>
-                        <text fg={message.meta?.mode === "plan" ? colors.pink : colors.mint} wrapMode="none" flexGrow={1} minWidth={0}>{message.content}</text>
-                      </box>
-                    ) : (
-                      <>
-                        <text fg={message.role === "user" ? colors.mint : message.role === "system" ? colors.muted : colors.pink}>
-                          {message.role === "user" ? "you ❯" : "mint ♡ · answer"}
-                        </text>
-                        <box flexDirection="column" gap={0} width="100%" minWidth={0}>
-                          {isStreamingRow() ? (
-                            <Show when={streamingContent()} fallback={<text fg={colors.peach} wrapMode="word" width="100%">Waiting for the response…</text>}>
-                              <markdown content={streamingContent()} syntaxStyle={markdownStyle()} fg={colors.text} conceal={true} streaming={true} width="100%" minWidth={0} />
-                            </Show>
-                          ) : message.content
-                            ? parseMessageSegments(message.content).map((seg) => renderSegment(seg, colors, markdownStyle()))
-                            : busy()
-                              ? <text fg={colors.peach} wrapMode="word" width="100%">Waiting for the response…</text>
-                              : null
-                          }
-                        </box>
-                      </>
-                    )}
-                  </box>
-                );
-              }}
-            </For>
-            </scrollbox>
-            <Show when={menuScrollActive()}>
-              <box position="absolute" top={0} left={0} width="100%" height="100%" zIndex={1} onMouseScroll={handleMenuWheel} />
-            </Show>
-          </box>
+                    </>
+                  )}
+                </box>
+              );
+            }}
+          </For>
+          </scrollbox>
           <Show when={commandPaletteOpen()}>
             <box backgroundColor={colors.bg} borderStyle="single" borderColor={colors.lavender} padding={1} flexDirection="column" gap={0} width="100%" minWidth={0} flexShrink={0} overflow="hidden" onMouseScroll={(e) => handleWheel(e, (d) => setCommandIndex(movePickerIndex(commandIndex(), d, commandSuggestions().length)))}>
               <box height={1} minHeight={1} width="100%" minWidth={0} overflow="hidden">
                 <text fg={colors.lavender} wrapMode="none" width="100%" minWidth={0} truncate={true}>{commandPaletteHeader()}</text>
               </box>
-              <For each={visibleWindow(commandIndex(), commandLimit(), commandSuggestions().length)}>{(idx) => {
-                const item = commandSuggestions()[idx];
-                if (!item) return <text> </text>;
+              <For each={visibleWindow(commandWindowStart(), commandLimit(), commandSuggestions().length).map((idx) => commandSuggestions()[idx])}>{(item, i) => {
+                const idx = () => commandWindowStart() + i();
                 return (
                   <box
                     flexDirection="row"
@@ -3077,12 +3088,12 @@ const showTokenUsage = () => terminal().width >= 48;
                     height={1}
                     minHeight={1}
                     overflow="hidden"
-                    backgroundColor={idx === commandIndex() ? colors.lavender : colors.bg}
-                    onMouseMove={() => { setCommandIndex(idx); }}
+                    backgroundColor={idx() === commandIndex() ? colors.lavender : colors.bg}
+                    onMouseMove={() => { setCommandIndex(idx()); }}
                     onMouseUp={(e) => { e.stopPropagation(); const value = input(); const completed = item.command.trimEnd(); const nextValue = completed + (item.command.endsWith(" ") ? " " : ""); setInput(nextValue); setCursorPos(nextValue.length); if (item.command.trim() === value.trim()) void send(); }}
                   >
                     <text
-                      fg={idx === commandIndex() ? colors.bg : colors.mint}
+                      fg={idx() === commandIndex() ? colors.bg : colors.mint}
                       width={24}
                       maxWidth="100%"
                       minWidth={0}
@@ -3091,11 +3102,11 @@ const showTokenUsage = () => terminal().width >= 48;
                       wrapMode="none"
                       truncate={true}
                     >
-                      {(idx === commandIndex() ? "❯ " : "  ") + item.command.trimEnd()}
+                      {(idx() === commandIndex() ? "❯ " : "  ") + item.command.trimEnd()}
                     </text>
                     <Show when={terminal().width >= 72}>
                       <text
-                        fg={idx === commandIndex() ? colors.bg : colors.muted}
+                        fg={idx() === commandIndex() ? colors.bg : colors.muted}
                         flexGrow={1}
                         minWidth={0}
                         wrapMode="none"
@@ -3274,10 +3285,8 @@ const showTokenUsage = () => terminal().width >= 48;
             </box>
           </Show>
           <Show when={modelPickerSuggestions().length > 0 && !modelPickerBusy()}>
-            <For each={visibleWindow(modelPickerIndex(), commandLimit(), modelPickerSuggestions().length)}>{(idx) => {
-              const allModels = filterModels(mergeCurrentModel(models(), configuredModel || model() || ""), modelPickerQuery());
-              const m = allModels[idx];
-              if (!m) return <text> </text>;
+            <For each={visibleWindow(modelWindowStart(), commandLimit(), modelPickerSuggestions().length).map((idx) => modelPickerSuggestions()[idx])}>{(m, i) => {
+              const idx = () => modelWindowStart() + i();
               const isCurrent = m.id === (configuredModel || model());
               return (
                 <box
@@ -3287,12 +3296,12 @@ const showTokenUsage = () => terminal().width >= 48;
                   height={1}
                   minHeight={1}
                   overflow="hidden"
-                  backgroundColor={idx === modelPickerIndex() ? colors.lavender : colors.bg}
-                  onMouseMove={() => { setModelPickerIndex(idx); }}
+                  backgroundColor={idx() === modelPickerIndex() ? colors.lavender : colors.bg}
+                  onMouseMove={() => { setModelPickerIndex(idx()); }}
                   onMouseUp={(e) => { e.stopPropagation(); void applyModel(m.id); }}
                 >
                   <text
-                    fg={idx === modelPickerIndex() ? colors.bg : isCurrent ? colors.mint : colors.text}
+                    fg={idx() === modelPickerIndex() ? colors.bg : isCurrent ? colors.mint : colors.text}
                     width={terminal().width >= 80 ? 48 : terminal().width >= 60 ? 36 : 28}
                     maxWidth="100%"
                     minWidth={0}
@@ -3301,11 +3310,11 @@ const showTokenUsage = () => terminal().width >= 48;
                     wrapMode="none"
                     truncate={true}
                   >
-                    {(idx === modelPickerIndex() ? "❯ " : "  ") + m.id + (isCurrent ? " ●" : "")}
+                    {(idx() === modelPickerIndex() ? "❯ " : "  ") + m.id + (isCurrent ? " ●" : "")}
                   </text>
                   <Show when={terminal().width >= 72 && m.owned_by}>
                     <text
-                      fg={idx === modelPickerIndex() ? colors.bg : colors.muted}
+                      fg={idx() === modelPickerIndex() ? colors.bg : colors.muted}
                       flexGrow={1}
                       minWidth={0}
                       wrapMode="none"
@@ -3401,8 +3410,8 @@ const showTokenUsage = () => terminal().width >= 48;
             <text fg={colors.muted} width="100%" minWidth={0} wrapMode="none" truncate={true}>Send a message to create your first session.</text>
           </Show>
           <Show when={filteredSessions().length > 0}>
-            <For each={visibleWindow(sessionPickerIndex(), commandLimit(), filteredSessions().length)}>{(idx) => {
-              const s = filteredSessions()[idx];
+            <For each={visibleWindow(sessionWindowStart(), commandLimit(), filteredSessions().length).map((idx) => filteredSessions()[idx])}>{(s, i) => {
+              const idx = () => sessionWindowStart() + i();
               return (
                 <box
                   flexDirection="row"
@@ -3411,18 +3420,18 @@ const showTokenUsage = () => terminal().width >= 48;
                   height={1}
                   minHeight={1}
                   overflow="hidden"
-                  backgroundColor={idx === sessionPickerIndex() ? colors.lavender : colors.panel}
-                  onMouseMove={(e) => { e.stopPropagation(); setSessionPickerIndex(idx); }}
+                  backgroundColor={idx() === sessionPickerIndex() ? colors.lavender : colors.panel}
+                  onMouseMove={(e) => { e.stopPropagation(); setSessionPickerIndex(idx()); }}
                   onMouseUp={(e) => { e.stopPropagation(); closeSessionPicker(); resumeSession(s.id); }}
                 >
                   <text
-                    fg={idx === sessionPickerIndex() ? colors.bg : colors.text}
+                    fg={idx() === sessionPickerIndex() ? colors.bg : colors.text}
                     wrapMode="none"
                     width="100%"
                     minWidth={0}
                     truncate={true}
                   >
-                    {(idx === sessionPickerIndex() ? "❯ " : "  ") + (s.title || "unnamed") + "  " + (s.model ? "[" + s.model + "]" : "[no model]") + "  #" + s.id}
+                    {(idx() === sessionPickerIndex() ? "❯ " : "  ") + (s.title || "unnamed") + "  " + (s.model ? "[" + s.model + "]" : "[no model]") + "  #" + s.id}
                   </text>
                 </box>
               );
